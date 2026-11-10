@@ -1,0 +1,37 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Spunky-Friends/spunkpipe"
+rust-version = "1.80"
+
+[workspace.dependencies]
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+blake3 = "1"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand = "0.8"
+zstd = "0.13"
+base64 = "0.22"
+hex = "0.4"
+walkdir = "2"
+clap = { version = "4", features = ["derive"] }
+tempfile = "3"
+toml = "0.8"
+
+spunkpipe-core = { path = "crates/spunkpipe-core" }
+spunkpipe-profile = { path = "crates/spunkpipe-profile" }
+spunkpipe-server = { path = "crates/spunkpipe-server" }
+spunkpipe-client = { path = "crates/spunkpipe-client" }
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = true
+panic = "abort"
