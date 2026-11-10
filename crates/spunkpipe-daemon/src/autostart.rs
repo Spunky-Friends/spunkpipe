@@ -3,6 +3,7 @@
 use spunkpipe_core::{Error, Result};
 use std::path::{Path, PathBuf};
 
+#[cfg(not(windows))]
 fn home() -> Result<PathBuf> {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))

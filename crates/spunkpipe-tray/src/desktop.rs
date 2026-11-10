@@ -48,14 +48,13 @@ fn build(app: &App) -> Result<(Menu, HashMap<MenuId, Action>, String)> {
 pub fn run() -> Result<()> {
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     #[cfg(target_os = "macos")]
-    {
+    let event_loop = {
         use tao::platform::macos::{ActivationPolicy, EventLoopExtMacOS};
         // Menu bar only, no Dock icon.
         let mut event_loop = event_loop;
         event_loop.set_activation_policy(ActivationPolicy::Accessory);
-        return run_loop(event_loop);
-    }
-    #[cfg(not(target_os = "macos"))]
+        event_loop
+    };
     run_loop(event_loop)
 }
 
