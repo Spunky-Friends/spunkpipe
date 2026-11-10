@@ -1,0 +1,13 @@
+PackageIdentifier: Spunky-Friends.SpunkPipe
+PackageVersion: @VERSION@
+InstallerType: zip
+NestedInstallerType: portable
+NestedInstallerFiles:
+  - RelativeFilePath: spunkpipe.exe
+    PortableCommandAlias: spunkpipe
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/Spunky-Friends/spunkpipe/releases/download/v@VERSION@/spunkpipe-@VERSION@-x86_64-pc-windows-msvc.zip
+    InstallerSha256: @SHA_X86_64_WINDOWS@
+ManifestType: installer
+ManifestVersion: 1.6.0

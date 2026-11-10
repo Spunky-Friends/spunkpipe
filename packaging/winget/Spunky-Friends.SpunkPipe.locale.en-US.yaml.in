@@ -1,0 +1,10 @@
+PackageIdentifier: Spunky-Friends.SpunkPipe
+PackageVersion: @VERSION@
+PackageLocale: en-US
+Publisher: Spunky Friends
+PackageName: SpunkPipe
+PackageUrl: https://github.com/Spunky-Friends/spunkpipe
+License: MIT OR Apache-2.0
+ShortDescription: Keeps game mods in sync with a game server.
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0

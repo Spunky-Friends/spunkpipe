@@ -50,8 +50,18 @@ want=$(grep "  $archive\$" "$tmp/SHA256SUMS" | cut -d' ' -f1)
 [ -n "$want" ] || { echo "No checksum for $archive" >&2; exit 1; }
 [ "$(sha256 "$tmp/$archive")" = "$want" ] || { echo "Checksum mismatch for $archive: refusing to install" >&2; exit 1; }
 
-mkdir -p "$dir"
-tar -xzf "$tmp/$archive" -C "$dir"
+mkdir -p "$dir" "$tmp/x"
+tar -xzf "$tmp/$archive" -C "$tmp/x"
+# Install only the programs (and the macOS app bundle), replacing any older copies.
+for f in spunkpipe spunkpipe-tray; do
+  cp "$tmp/x/$f" "$dir/$f.new"
+  chmod 755 "$dir/$f.new"
+  mv -f "$dir/$f.new" "$dir/$f"
+done
+if [ -d "$tmp/x/SpunkPipe.app" ]; then
+  rm -rf "$dir/SpunkPipe.app"
+  cp -R "$tmp/x/SpunkPipe.app" "$dir/SpunkPipe.app"
+fi
 echo "Installed to $dir"
 
 case ":$PATH:" in

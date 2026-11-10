@@ -1,0 +1,41 @@
+class Spunkpipe < Formula
+  desc "Keeps game mods in sync with a game server"
+  homepage "https://github.com/Spunky-Friends/spunkpipe"
+  version "@VERSION@"
+  license any_of: ["MIT", "Apache-2.0"]
+
+  on_macos do
+    on_arm do
+      url "https://github.com/Spunky-Friends/spunkpipe/releases/download/v@VERSION@/spunkpipe-@VERSION@-aarch64-apple-darwin.tar.gz"
+      sha256 "@SHA_AARCH64_DARWIN@"
+    end
+    on_intel do
+      url "https://github.com/Spunky-Friends/spunkpipe/releases/download/v@VERSION@/spunkpipe-@VERSION@-x86_64-apple-darwin.tar.gz"
+      sha256 "@SHA_X86_64_DARWIN@"
+    end
+  end
+
+  on_linux do
+    on_intel do
+      url "https://github.com/Spunky-Friends/spunkpipe/releases/download/v@VERSION@/spunkpipe-@VERSION@-x86_64-unknown-linux-musl.tar.gz"
+      sha256 "@SHA_X86_64_LINUX@"
+    end
+  end
+
+  def install
+    bin.install "spunkpipe", "spunkpipe-tray"
+    prefix.install "SpunkPipe.app" if OS.mac?
+  end
+
+  def caveats
+    <<~EOS
+      Set up with the invite you were sent:
+        spunkpipe join '<invite>'
+      Update with `brew upgrade spunkpipe` (not `spunkpipe update`).
+    EOS
+  end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/spunkpipe --version")
+  end
+end
