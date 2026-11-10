@@ -1,0 +1,15 @@
+[package]
+name = "spunkpipe-tray"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+spunkpipe-core.workspace = true
+spunkpipe-daemon.workspace = true
+anyhow.workspace = true
+png = "0.18.1"
+notify-rust = "4.17.0"
+ksni = "0.3.7"

@@ -258,11 +258,20 @@ fn fetch_blob(
 ) -> Result<u64> {
     let part = staging.join(format!("{hash}.zst.part"));
     let staged = staging.join(hash.to_hex());
+    let tmp = staging.join(format!("{hash}.tmp"));
     if staged.exists() {
-        // Left by an earlier run that was stopped before applying; it was verified when written.
-        progress.bytes_done.fetch_add(stored, Ordering::Relaxed);
-        progress.blobs_done.fetch_add(1, Ordering::Relaxed);
-        return Ok(0);
+        // Left by an earlier run that was stopped before applying. Never trust it blindly:
+        // re-check size and hash, and throw it away if it does not match.
+        let ok = fs::metadata(&staged).is_ok_and(|m| m.len() == size)
+            && fs::File::open(&staged)
+                .and_then(|f| Hash::from_reader(io::BufReader::new(f)))
+                .is_ok_and(|h| &h == hash);
+        if ok {
+            progress.bytes_done.fetch_add(stored, Ordering::Relaxed);
+            progress.blobs_done.fetch_add(1, Ordering::Relaxed);
+            return Ok(0);
+        }
+        let _ = fs::remove_file(&staged);
     }
     let mut transferred = 0;
     // A valid blob cannot be larger than zstd's worst case for `size` bytes (plus a little framing).
@@ -284,7 +293,12 @@ fn fetch_blob(
             let _ = fs::remove_file(&part);
             return Err(Error::CorruptBlob(hash.to_hex(), "blob larger than its declared size allows".into()));
         }
-        match spunkpipe_core::store::decode_verified(&part, &staged, hash, size) {
+        // Decode to a temporary name and rename only once verified, so a crash mid-decode can
+        // never leave a partial file under the final staged name.
+        let verified = spunkpipe_core::store::decode_verified(&part, &tmp, hash, size).and_then(|()| {
+            fs::rename(&tmp, &staged).map_err(Error::from)
+        });
+        match verified {
             Ok(()) => {
                 let _ = fs::remove_file(&part);
                 progress.blobs_done.fetch_add(1, Ordering::Relaxed);
