@@ -6,10 +6,23 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
+[[bin]]
+name = "spunkpipe-tray"
+path = "src/main.rs"
+
 [dependencies]
 spunkpipe-core.workspace = true
+spunkpipe-profile.workspace = true
 spunkpipe-daemon.workspace = true
 anyhow.workspace = true
 png = "0.18.1"
 notify-rust = "4.17.0"
-ksni = "0.3.7"
+
+# Linux and other Unix desktops: a StatusNotifierItem over D-Bus, with no GTK dependency.
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+ksni = { version = "0.3.7", default-features = false, features = ["blocking", "async-io"] }
+
+# Windows and macOS.
+[target.'cfg(any(windows, target_os = "macos"))'.dependencies]
+tray-icon = "0.21"
+tao = "0.34"
