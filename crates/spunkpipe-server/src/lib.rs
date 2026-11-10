@@ -16,6 +16,9 @@ pub struct PublishOptions {
     pub source: PathBuf,
     /// The web root to write into.
     pub out: PathBuf,
+    /// Publisher-private state (hash cache, last serial). Must NOT be inside the web root:
+    /// anything in the web root is readable, and possibly writable, by other parties.
+    pub state: PathBuf,
     pub game: String,
     pub key: SecretKey,
     /// Publish even if nothing changed.
@@ -38,6 +41,8 @@ pub struct PublishResult {
 struct Cache {
     // path -> (size, mtime_ns, hash)
     entries: BTreeMap<String, (u64, u128, Hash)>,
+    /// The highest serial this publisher has ever issued; never reused even if `latest` is rewound.
+    last_serial: u64,
 }
 
 fn mtime_ns(md: &fs::Metadata) -> u128 {
@@ -101,8 +106,12 @@ pub fn publish(opts: &PublishOptions) -> Result<PublishResult> {
     if !opts.source.is_dir() {
         return Err(Error::Other(format!("{} is not a directory", opts.source.display())));
     }
+    if opts.state.starts_with(&opts.out) {
+        return Err(Error::Other("the publisher state folder must not be inside the web root".into()));
+    }
     fs::create_dir_all(&opts.out)?;
-    let cache_path = opts.out.join(".publish-cache.json");
+    fs::create_dir_all(&opts.state)?;
+    let cache_path = opts.state.join("publish-cache.json");
     let cache: Cache = fs::read(&cache_path)
         .ok()
         .and_then(|b| serde_json::from_slice(&b).ok())
@@ -127,27 +136,37 @@ pub fn publish(opts: &PublishOptions) -> Result<PublishResult> {
         files.push(entry);
     }
 
-    let new_cache = Cache {
+    let mut new_cache = Cache {
         entries: scanned
             .iter()
             .zip(&files)
             .map(|(s, f)| (s.rel.clone(), (f.size, s.mtime, f.hash)))
             .collect(),
+        last_serial: cache.last_serial,
     };
-    atomic_write(&cache_path, &serde_json::to_vec(&new_cache)?)?;
 
-    let prev = read_serial(&opts.out)?;
+    // Whatever `latest` says, never reuse a serial this publisher has already issued.
+    let prev = read_serial(&opts.out).ok().flatten();
     if let Some(prev_serial) = prev {
-        let prev_bytes = fs::read(opts.out.join(manifest_path(prev_serial)))?;
-        let prev_manifest = Manifest::from_bytes(&prev_bytes)?;
+        // Only trust the previous manifest if it still carries our own valid signature.
+        let prev_manifest = fs::read(opts.out.join(manifest_path(prev_serial)))
+            .ok()
+            .zip(fs::read_to_string(opts.out.join(signature_path(prev_serial))).ok())
+            .filter(|(bytes, sig)| opts.key.public().verify(bytes, sig).is_ok())
+            .and_then(|(bytes, _)| Manifest::from_bytes(&bytes).ok());
         let mut sorted = files.clone();
         sorted.sort_by(|a, b| a.path.cmp(&b.path));
-        if !opts.force && prev_manifest.game == opts.game && prev_manifest.files == sorted {
-            return Ok(PublishResult { serial: prev_serial, files: files.len(), new_blobs, published: false });
+        if let Some(pm) = prev_manifest {
+            if !opts.force && pm.serial == prev_serial && pm.game == opts.game && pm.files == sorted {
+                atomic_write(&cache_path, &serde_json::to_vec(&new_cache)?)?;
+                return Ok(PublishResult { serial: prev_serial, files: files.len(), new_blobs, published: false });
+            }
         }
     }
 
-    let serial = prev.unwrap_or(0) + 1;
+    let serial = prev.unwrap_or(0).max(cache.last_serial) + 1;
+    new_cache.last_serial = serial;
+    atomic_write(&cache_path, &serde_json::to_vec(&new_cache)?)?;
     let created = std::time::SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
     let manifest = Manifest::new(&opts.game, serial, created, files);
     manifest.validate()?;
@@ -208,7 +227,8 @@ mod tests {
     use super::*;
 
     fn opts(src: &Path, out: &Path, key: SecretKey) -> PublishOptions {
-        PublishOptions { source: src.into(), out: out.into(), game: "7dtd".into(), key, force: false, keep: 2, threads: 4 }
+        let state = out.parent().unwrap().join("pubstate");
+        PublishOptions { source: src.into(), out: out.into(), state, game: "7dtd".into(), key, force: false, keep: 2, threads: 4 }
     }
 
     #[test]

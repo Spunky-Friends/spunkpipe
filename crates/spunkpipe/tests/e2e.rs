@@ -43,6 +43,7 @@ fn do_publish(e: &Env) -> u64 {
     publish(&PublishOptions {
         source: e.src.clone(),
         out: e.web.clone(),
+        state: e.web.parent().unwrap().join("pubstate"),
         game: "7dtd".into(),
         key: SecretKey::from_base64(&e.key).unwrap(),
         force: false,
@@ -242,4 +243,44 @@ fn state_inside_target_is_refused() {
     do_publish(&e);
     let bad = SyncOptions { state: e.target.join(".state"), ..opts(&e) };
     assert!(sync(&DirSource(e.web.clone()), &pubkey(&e), &bad).is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn refuses_to_write_through_symlinked_folder() {
+    let e = env();
+    let outside = e._d.path().join("outside");
+    fs::create_dir_all(&outside).unwrap();
+    std::os::unix::fs::symlink(&outside, e.target.join("Evil")).unwrap();
+    put(&e.src, "Evil/pwn.xml", "x");
+    do_publish(&e);
+    let err = sync(&DirSource(e.web.clone()), &pubkey(&e), &opts(&e)).unwrap_err();
+    assert!(err.to_string().contains("symlink"), "{err}");
+    assert!(fs::read_dir(&outside).unwrap().next().is_none());
+}
+
+#[test]
+fn publisher_never_reuses_a_serial_and_keeps_state_out_of_the_web_root() {
+    let e = env();
+    put(&e.src, "M/a.xml", "one");
+    do_publish(&e);
+    put(&e.src, "M/a.xml", "two");
+    assert_eq!(do_publish(&e), 2);
+    // Someone rewinds `latest`; the publisher must not hand out serial 2 again.
+    fs::write(e.web.join("latest"), "1\n").unwrap();
+    put(&e.src, "M/a.xml", "three");
+    assert_eq!(do_publish(&e), 3);
+    assert!(!e.web.join(".publish-cache.json").exists());
+}
+
+#[test]
+fn oversized_blob_is_rejected() {
+    let e = env();
+    put(&e.src, "M/a.xml", "tiny");
+    do_publish(&e);
+    let blob = e.web.join(spunkpipe_core::Hash::of(b"tiny").blob_path());
+    fs::write(&blob, vec![0u8; 5_000_000]).unwrap();
+    let err = sync(&DirSource(e.web.clone()), &pubkey(&e), &opts(&e)).unwrap_err();
+    assert!(err.to_string().contains("larger"), "{err}");
+    assert!(!e.state.join("staging").join(format!("{}.zst.part", spunkpipe_core::Hash::of(b"tiny"))).exists());
 }

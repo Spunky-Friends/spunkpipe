@@ -109,7 +109,7 @@ struct Backups<'a> {
 impl Backups<'_> {
     /// Moves whatever is at `rel` out of the managed folder so nothing of the user's is ever lost.
     fn save(&mut self, rel: &str) -> Result<()> {
-        let from = join_safe(self.target, rel)?;
+        let from = checked_dest(self.target, rel)?;
         let to = join_safe(&self.dir, rel)?;
         fs::create_dir_all(to.parent().unwrap())?;
         move_file(&from, &to)?;
@@ -128,17 +128,50 @@ fn prune_empty_parents(target: &Path, file: &Path) {
     }
 }
 
+/// Joins `rel` onto `target` and refuses if any folder on the way is a symlink, so a link can
+/// never redirect a write or delete outside the managed folder. (Windows junctions are not
+/// detected by `is_symlink`; the managed folder is expected to be a normal game folder.)
+fn checked_dest(target: &Path, rel: &str) -> Result<PathBuf> {
+    let dest = join_safe(target, rel)?;
+    let mut cur = target.to_path_buf();
+    let comps: Vec<&str> = rel.split('/').collect();
+    for comp in &comps[..comps.len() - 1] {
+        cur.push(comp);
+        match fs::symlink_metadata(&cur) {
+            Ok(md) if md.file_type().is_symlink() => {
+                return Err(Error::Other(format!("refusing to write through symlink {}", cur.display())));
+            }
+            Ok(_) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => break,
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Ok(dest)
+}
+
 /// Downloads one blob (resuming a partial download) and verifies it into `staging/<hash>`.
 fn fetch_blob(source: &dyn Source, staging: &Path, hash: &Hash, size: u64) -> Result<u64> {
     let part = staging.join(format!("{hash}.zst.part"));
     let staged = staging.join(hash.to_hex());
     let mut transferred = 0;
+    // A valid blob cannot be larger than zstd's worst case for `size` bytes (plus a little framing).
+    let max_total = zstd::zstd_safe::compress_bound(size as usize) as u64 + 1024;
     for attempt in 0..2 {
         let offset = fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
+        if offset > max_total {
+            let _ = fs::remove_file(&part);
+            continue;
+        }
         let mut reader = source.open(&hash.blob_path(), offset)?;
         let mut f = OpenOptions::new().create(true).append(true).open(&part)?;
-        transferred += io::copy(&mut reader, &mut f)?;
+        // Read one byte past the limit so an oversized stream is detected, not silently truncated.
+        let n = io::copy(&mut io::Read::take(&mut reader, max_total - offset + 1), &mut f)?;
         drop(f);
+        transferred += n;
+        if offset + n > max_total {
+            let _ = fs::remove_file(&part);
+            return Err(Error::CorruptBlob(hash.to_hex(), "blob larger than its declared size allows".into()));
+        }
         match spunkpipe_core::store::decode_verified(&part, &staged, hash, size) {
             Ok(()) => {
                 let _ = fs::remove_file(&part);
@@ -238,7 +271,7 @@ pub fn sync(source: &dyn Source, key: &PublicKey, opts: &SyncOptions) -> Result<
     for (hash, (_, entries)) in &groups {
         let staged = staging.join(hash.to_hex());
         for (i, f) in entries.iter().enumerate() {
-            let dest = join_safe(target, &f.path)?;
+            let dest = checked_dest(target, &f.path)?;
             if blocked[f.path.as_str()] {
                 backups.save(&f.path)?;
             }
@@ -252,7 +285,7 @@ pub fn sync(source: &dyn Source, key: &PublicKey, opts: &SyncOptions) -> Result<
         }
     }
     for rel in &stale {
-        let dest = join_safe(target, rel)?;
+        let dest = checked_dest(target, rel)?;
         let locked = lock.files.get(rel.as_str());
         match inspect(&dest, locked)? {
             Disk::Missing => {}

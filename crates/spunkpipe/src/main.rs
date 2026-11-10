@@ -40,6 +40,10 @@ enum Cmd {
         out: PathBuf,
         #[arg(long)]
         key: PathBuf,
+        /// Publisher-private state (hash cache, last serial). Must be outside the web root.
+        /// Defaults to `<key>.state` next to the key file.
+        #[arg(long)]
+        state: Option<PathBuf>,
         #[arg(long, default_value = "7dtd")]
         game: String,
         /// Old manifests to keep for rollback.
@@ -99,9 +103,14 @@ fn main() -> Result<()> {
             let pk = SecretKey::load(&key)?.public();
             println!("{}", Invite::new(!http, &host, pk));
         }
-        Cmd::Publish { source, out, key, game, keep, force } => {
+        Cmd::Publish { source, out, key, state, game, keep, force } => {
+            let state = state.unwrap_or_else(|| {
+                let mut s = key.clone().into_os_string();
+                s.push(".state");
+                PathBuf::from(s)
+            });
             let key = SecretKey::load(&key).context("loading signing key")?;
-            let r = publish(&PublishOptions { source, out, game, key, force, keep, threads: default_threads() })?;
+            let r = publish(&PublishOptions { source, out, state, game, key, force, keep, threads: default_threads() })?;
             if r.published {
                 println!("Published serial {} ({} files, {} new blobs)", r.serial, r.files, r.new_blobs);
             } else {
