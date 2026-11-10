@@ -6,4 +6,4 @@ pub mod sync;
 
 pub use lock::Lock;
 pub use source::{DirSource, HttpSource, Source};
-pub use sync::{sync, Report, SyncOptions};
+pub use sync::{apply, check, stage, sync, Check, Pending, Progress, Report, SyncOptions};

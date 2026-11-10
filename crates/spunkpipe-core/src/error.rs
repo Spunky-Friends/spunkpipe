@@ -21,6 +21,8 @@ pub enum Error {
     BadInvite(String),
     #[error("blob {0} is corrupt: {1}")]
     CorruptBlob(String, String),
+    #[error("cancelled")]
+    Cancelled,
     #[error("not found: {0}")]
     NotFound(String),
     #[error("{0}")]

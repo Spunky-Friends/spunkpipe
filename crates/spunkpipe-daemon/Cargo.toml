@@ -1,0 +1,20 @@
+[package]
+name = "spunkpipe-daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+spunkpipe-core.workspace = true
+spunkpipe-client.workspace = true
+spunkpipe-profile.workspace = true
+serde.workspace = true
+toml.workspace = true
+thiserror.workspace = true
+sysinfo = { version = "0.36.1", default-features = false, features = ["system"] }
+
+[dev-dependencies]
+spunkpipe-server.workspace = true
+tempfile.workspace = true

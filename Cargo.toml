@@ -7,7 +7,7 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Spunky-Friends/spunkpipe"
-rust-version = "1.80"
+rust-version = "1.82"
 
 [workspace.dependencies]
 anyhow = "1"
@@ -29,6 +29,7 @@ spunkpipe-core = { path = "crates/spunkpipe-core" }
 spunkpipe-profile = { path = "crates/spunkpipe-profile" }
 spunkpipe-server = { path = "crates/spunkpipe-server" }
 spunkpipe-client = { path = "crates/spunkpipe-client" }
+spunkpipe-daemon = { path = "crates/spunkpipe-daemon" }
 
 [profile.release]
 lto = "fat"

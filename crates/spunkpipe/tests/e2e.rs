@@ -298,3 +298,24 @@ fn hostile_latest_cannot_overflow_or_inflate_the_serial() {
     assert_eq!(do_publish(&e), 3);
     assert_eq!(fs::read_to_string(e.web.join("latest")).unwrap().trim(), "3");
 }
+
+#[test]
+fn a_damaged_staged_file_is_not_trusted() {
+    use spunkpipe_client::{apply, check, stage, Check, Progress};
+    use std::sync::atomic::AtomicBool;
+    let e = env();
+    put(&e.src, "M/a.xml", "genuine content");
+    do_publish(&e);
+    let o = opts(&e);
+    let src = DirSource(e.web.clone());
+    let Check::Pending(p) = check(&src, &pubkey(&e), &o).unwrap() else { panic!("expected an update") };
+    let h = spunkpipe_core::Hash::of(b"genuine content");
+    let staged = e.state.join("staging").join(h.to_hex());
+    fs::create_dir_all(staged.parent().unwrap()).unwrap();
+    // A leftover from a crash or tampering, sitting under the final staged name.
+    fs::write(&staged, b"genuine content").unwrap();
+    fs::write(&staged, b"EVIL").unwrap();
+    stage(&src, &o, &p, &AtomicBool::new(false), &Progress::default()).unwrap();
+    apply(&o, &p).unwrap();
+    assert_eq!(read(&e.target, "M/a.xml"), "genuine content");
+}

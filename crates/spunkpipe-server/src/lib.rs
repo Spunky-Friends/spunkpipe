@@ -39,8 +39,8 @@ pub struct PublishResult {
 
 #[derive(Serialize, Deserialize, Default)]
 struct Cache {
-    // path -> (size, mtime_ns, hash)
-    entries: BTreeMap<String, (u64, u128, Hash)>,
+    // path -> (size, mtime_ns, hash, stored size)
+    entries: BTreeMap<String, (u64, u128, Hash, u64)>,
     /// The highest serial this publisher has ever issued; never reused even if `latest` is rewound.
     last_serial: u64,
 }
@@ -119,13 +119,13 @@ pub fn publish(opts: &PublishOptions) -> Result<PublishResult> {
 
     let scanned = scan(&opts.source)?;
     let results = spunkpipe_core::par::par_map(&scanned, opts.threads, |s| -> Result<(FileEntry, bool)> {
-        if let Some(&(size, mtime, hash)) = cache.entries.get(&s.rel) {
+        if let Some(&(size, mtime, hash, stored)) = cache.entries.get(&s.rel) {
             if size == s.size && mtime == s.mtime && opts.out.join(hash.blob_path()).exists() {
-                return Ok((FileEntry { path: s.rel.clone(), hash, size }, false));
+                return Ok((FileEntry { path: s.rel.clone(), hash, size, stored }, false));
             }
         }
-        let (hash, size, new) = store::add_file(&opts.out, &s.abs)?;
-        Ok((FileEntry { path: s.rel.clone(), hash, size }, new))
+        let (hash, size, stored, new) = store::add_file(&opts.out, &s.abs)?;
+        Ok((FileEntry { path: s.rel.clone(), hash, size, stored }, new))
     });
 
     let mut files = Vec::with_capacity(results.len());
@@ -140,7 +140,7 @@ pub fn publish(opts: &PublishOptions) -> Result<PublishResult> {
         entries: scanned
             .iter()
             .zip(&files)
-            .map(|(s, f)| (s.rel.clone(), (f.size, s.mtime, f.hash)))
+            .map(|(s, f)| (s.rel.clone(), (f.size, s.mtime, f.hash, f.stored)))
             .collect(),
         last_serial: cache.last_serial,
     };

@@ -11,6 +11,7 @@ spunkpipe-core.workspace = true
 spunkpipe-profile.workspace = true
 spunkpipe-server.workspace = true
 spunkpipe-client.workspace = true
+spunkpipe-daemon.workspace = true
 clap.workspace = true
 anyhow.workspace = true
 
