@@ -7,3 +7,12 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+spunkpipe-core.workspace = true
+spunkpipe-profile.workspace = true
+spunkpipe-server.workspace = true
+spunkpipe-client.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

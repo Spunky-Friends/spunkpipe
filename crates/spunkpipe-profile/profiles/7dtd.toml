@@ -1,0 +1,21 @@
+id = "7dtd"
+name = "7 Days to Die"
+steam_app_id = 251570
+managed_dir = "Mods"
+process_names = ["7DaysToDie", "7DaysToDie.exe", "7DaysToDie.x86_64", "7DaysToDieServer.x86_64"]
+
+[[install_candidates]]
+os = "linux"
+path = "~/.local/share/Steam/steamapps/common/7 Days To Die"
+
+[[install_candidates]]
+os = "linux"
+path = "~/.steam/steam/steamapps/common/7 Days To Die"
+
+[[install_candidates]]
+os = "windows"
+path = "C:/Program Files (x86)/Steam/steamapps/common/7 Days To Die"
+
+[[install_candidates]]
+os = "macos"
+path = "~/Library/Application Support/Steam/steamapps/common/7 Days To Die"
