@@ -284,3 +284,17 @@ fn oversized_blob_is_rejected() {
     assert!(err.to_string().contains("larger"), "{err}");
     assert!(!e.state.join("staging").join(format!("{}.zst.part", spunkpipe_core::Hash::of(b"tiny"))).exists());
 }
+
+#[test]
+fn hostile_latest_cannot_overflow_or_inflate_the_serial() {
+    let e = env();
+    put(&e.src, "M/a.xml", "one");
+    do_publish(&e);
+    fs::write(e.web.join("latest"), "18446744073709551615\n").unwrap();
+    put(&e.src, "M/a.xml", "two");
+    assert_eq!(do_publish(&e), 2);
+    // A rewound pointer with unchanged content is repaired rather than skipped.
+    fs::write(e.web.join("latest"), "1\n").unwrap();
+    assert_eq!(do_publish(&e), 3);
+    assert_eq!(fs::read_to_string(e.web.join("latest")).unwrap().trim(), "3");
+}

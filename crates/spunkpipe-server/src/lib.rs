@@ -145,26 +145,31 @@ pub fn publish(opts: &PublishOptions) -> Result<PublishResult> {
         last_serial: cache.last_serial,
     };
 
-    // Whatever `latest` says, never reuse a serial this publisher has already issued.
-    let prev = read_serial(&opts.out).ok().flatten();
-    if let Some(prev_serial) = prev {
-        // Only trust the previous manifest if it still carries our own valid signature.
-        let prev_manifest = fs::read(opts.out.join(manifest_path(prev_serial)))
-            .ok()
-            .zip(fs::read_to_string(opts.out.join(signature_path(prev_serial))).ok())
-            .filter(|(bytes, sig)| opts.key.public().verify(bytes, sig).is_ok())
-            .and_then(|(bytes, _)| Manifest::from_bytes(&bytes).ok());
+    // `latest` lives in the web root, so it is only a hint. It counts only if it points at a
+    // manifest that carries this publisher's own valid signature for that same serial.
+    let trusted_prev = read_serial(&opts.out)
+        .ok()
+        .flatten()
+        .and_then(|n| {
+            let bytes = fs::read(opts.out.join(manifest_path(n))).ok()?;
+            let sig = fs::read_to_string(opts.out.join(signature_path(n))).ok()?;
+            opts.key.public().verify(&bytes, &sig).ok()?;
+            let m = Manifest::from_bytes(&bytes).ok()?;
+            (m.serial == n).then_some(m)
+        });
+    if let Some(pm) = &trusted_prev {
         let mut sorted = files.clone();
         sorted.sort_by(|a, b| a.path.cmp(&b.path));
-        if let Some(pm) = prev_manifest {
-            if !opts.force && pm.serial == prev_serial && pm.game == opts.game && pm.files == sorted {
-                atomic_write(&cache_path, &serde_json::to_vec(&new_cache)?)?;
-                return Ok(PublishResult { serial: prev_serial, files: files.len(), new_blobs, published: false });
-            }
+        // Skip only when the live manifest is also the newest one we ever issued
+        // (so a rewound `latest` gets repaired by a real publish instead).
+        if !opts.force && pm.serial == cache.last_serial && pm.game == opts.game && pm.files == sorted {
+            atomic_write(&cache_path, &serde_json::to_vec(&new_cache)?)?;
+            return Ok(PublishResult { serial: pm.serial, files: files.len(), new_blobs, published: false });
         }
     }
 
-    let serial = prev.unwrap_or(0).max(cache.last_serial) + 1;
+    let base = trusted_prev.as_ref().map_or(0, |m| m.serial).max(cache.last_serial);
+    let serial = base.checked_add(1).ok_or_else(|| Error::Other("serial number overflow".into()))?;
     new_cache.last_serial = serial;
     atomic_write(&cache_path, &serde_json::to_vec(&new_cache)?)?;
     let created = std::time::SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
