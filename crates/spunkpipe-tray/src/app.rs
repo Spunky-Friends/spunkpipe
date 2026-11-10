@@ -10,10 +10,19 @@ use std::sync::{Arc, Mutex};
 /// Called when anything visible changed. The platform shell installs the real one.
 pub type Refresh = Arc<Mutex<Box<dyn Fn() + Send>>>;
 
+/// Why the tray is stopping.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Exit {
+    Quit,
+    /// The configuration changed (a new game was joined); start again to pick it up.
+    Restart,
+}
+
 pub struct App {
     daemon: Daemon,
     config: Config,
-    quit_tx: Sender<()>,
+    quit_tx: Sender<Exit>,
+    refresh: Refresh,
 }
 
 pub fn notify(title: &str, body: &str) {
@@ -27,7 +36,7 @@ fn game_name(game: &str) -> String {
 impl App {
     /// Starts the daemon for every configured game. Returns the app and a receiver that fires
     /// when the user picks Quit.
-    pub fn start(refresh: Refresh) -> Result<(Arc<App>, Receiver<()>)> {
+    pub fn start(refresh: Refresh) -> Result<(Arc<App>, Receiver<Exit>)> {
         let path = paths::config_file().context("cannot work out a config folder (set SPUNKPIPE_HOME)")?;
         let config = Config::load(&path)?;
         if config.games.is_empty() {
@@ -35,6 +44,7 @@ impl App {
         }
         let (quit_tx, quit_rx) = channel();
         let prev: Mutex<HashMap<String, Status>> = Mutex::new(HashMap::new());
+        let refresh_cb = refresh.clone();
         let daemon = Daemon::start(
             &path,
             Arc::new(move |game: &str, snap: &Snapshot| {
@@ -43,10 +53,12 @@ impl App {
                 if let Some((t, b)) = notification_for(old.as_ref(), &view) {
                     notify(&t, &b);
                 }
-                (refresh.lock().unwrap())();
+                (refresh_cb.lock().unwrap())();
             }),
         )?;
-        Ok((Arc::new(App { daemon, config, quit_tx }), quit_rx))
+        let app = Arc::new(App { daemon, config, quit_tx, refresh });
+        app.watch_config(path);
+        Ok((app, quit_rx))
     }
 
     pub fn views(&self) -> Vec<GameView> {
@@ -79,9 +91,7 @@ impl App {
                     open_folder(&c.target);
                 }
             }
-            Action::Quit => {
-                let _ = self.quit_tx.send(());
-            }
+            Action::Quit => self.request_exit(Exit::Quit),
         }
     }
 
@@ -91,8 +101,37 @@ impl App {
         }
     }
 
-    pub fn shutdown(&self) {
+    fn request_exit(&self, why: Exit) {
+        let _ = self.quit_tx.send(why);
+        // Wake the platform event loop so it notices.
+        (self.refresh.lock().unwrap())();
+    }
+
+    /// Notices when another process (`spunkpipe join`, or a clicked invite link) changed which
+    /// games are configured, and restarts so the new game is picked up. Mode changes made from
+    /// this tray do not count.
+    fn watch_config(self: &Arc<Self>, path: std::path::PathBuf) {
+        fn identity(c: &Config) -> Vec<(String, String, std::path::PathBuf)> {
+            c.games.iter().map(|g| (g.game.clone(), g.invite.clone(), g.target.clone())).collect()
+        }
+        let (app, baseline) = (self.clone(), identity(&self.config));
+        std::thread::spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_secs(3));
+            if Config::load(&path).is_ok_and(|c| identity(&c) != baseline) {
+                app.request_exit(Exit::Restart);
+                return;
+            }
+        });
+    }
+
+    /// Stops the engines, and starts a fresh tray if asked to.
+    pub fn finish(&self, why: Exit) {
         self.daemon.quit();
+        if why == Exit::Restart {
+            if let Ok(exe) = std::env::current_exe() {
+                let _ = std::process::Command::new(exe).spawn();
+            }
+        }
     }
 }
 

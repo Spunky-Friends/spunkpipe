@@ -1,6 +1,6 @@
 //! Windows and macOS: a native tray icon driven by a small event loop.
 
-use crate::app::{App, Refresh};
+use crate::app::{App, Exit, Refresh};
 use crate::icon;
 use crate::menu::{build_menu, tooltip, Action, Item};
 use anyhow::{Context, Result};
@@ -71,7 +71,14 @@ fn run_loop(event_loop: tao::event_loop::EventLoop<UserEvent>) -> Result<()> {
             let _ = p.send_event(UserEvent::Refresh);
         })))
     };
-    let (app, quit) = App::start(refresh)?;
+    let (app, quit) = match App::start(refresh) {
+        Ok(v) => v,
+        // Launched by a clicked invite link before anything is set up: wait for the link event.
+        #[cfg(target_os = "macos")]
+        Err(_) => return wait_for_link(event_loop),
+        #[cfg(not(target_os = "macos"))]
+        Err(e) => return Err(e),
+    };
 
     // Keep the percentage moving during a download, and notice Quit from any thread.
     {
@@ -88,8 +95,8 @@ fn run_loop(event_loop: tao::event_loop::EventLoop<UserEvent>) -> Result<()> {
     let mut actions: HashMap<MenuId, Action> = HashMap::new();
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
-        if quit.try_recv().is_ok() {
-            app.shutdown();
+        if let Ok(why) = quit.try_recv() {
+            app.finish(why);
             *control_flow = ControlFlow::Exit;
             return;
         }
@@ -120,11 +127,48 @@ fn run_loop(event_loop: tao::event_loop::EventLoop<UserEvent>) -> Result<()> {
                     let quitting = *a == Action::Quit;
                     app.handle(a.clone());
                     if quitting {
-                        app.shutdown();
+                        app.finish(Exit::Quit);
                         *control_flow = ControlFlow::Exit;
                     }
                 }
             }
+            // macOS delivers clicked spunkpipe:// links as an event, not as an argument.
+            Event::Opened { urls } => {
+                for u in urls.iter().map(|u| u.to_string()).filter(|u| crate::link::is_link(u)) {
+                    std::thread::spawn(move || {
+                        if let Err(e) = crate::link::join_from_link(&u) {
+                            crate::app::notify("SpunkPipe", &format!("{e:#}"));
+                        }
+                    });
+                }
+            }
+            _ => {}
+        }
+    });
+}
+
+/// macOS: the app was opened by an invite link, which arrives as an event shortly after launch.
+/// Join from it, then start again as the normal tray.
+#[cfg(target_os = "macos")]
+fn wait_for_link(event_loop: tao::event_loop::EventLoop<UserEvent>) -> Result<()> {
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    event_loop.run(move |event, _, control_flow| {
+        *control_flow = ControlFlow::WaitUntil(deadline);
+        match event {
+            Event::Opened { urls } => {
+                for u in urls.iter().map(|u| u.to_string()).filter(|u| crate::link::is_link(u)) {
+                    std::thread::spawn(move || match crate::link::join_from_link(&u) {
+                        Ok(()) => {
+                            if let Ok(exe) = std::env::current_exe() {
+                                let _ = std::process::Command::new(exe).spawn();
+                            }
+                            std::process::exit(0);
+                        }
+                        Err(e) => crate::app::notify("SpunkPipe", &format!("{e:#}")),
+                    });
+                }
+            }
+            Event::NewEvents(StartCause::ResumeTimeReached { .. }) => *control_flow = ControlFlow::Exit,
             _ => {}
         }
     });
