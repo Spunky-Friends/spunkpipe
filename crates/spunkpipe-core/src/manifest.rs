@@ -28,6 +28,14 @@ pub struct Manifest {
     pub files: Vec<FileEntry>,
 }
 
+/// Two paths with the same key may refer to the same file on a case-insensitive or
+/// normalising filesystem.
+fn collision_key(path: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    // Lowercase, decompose, then lowercase again: some characters only fold after decomposition.
+    path.to_lowercase().nfd().collect::<String>().to_lowercase()
+}
+
 impl Manifest {
     pub fn new(game: &str, serial: u64, created_unix: u64, mut files: Vec<FileEntry>) -> Self {
         files.sort_by(|a, b| a.path.cmp(&b.path));
@@ -66,9 +74,10 @@ impl Manifest {
                 }
             }
             prev = Some(&f.path);
-            // Windows and macOS are case-insensitive: two paths differing only in case collide.
-            if !seen.insert(f.path.to_lowercase()) {
-                return bad(format!("case-insensitive duplicate {:?}", f.path));
+            // Windows and macOS are case-insensitive and macOS normalises Unicode, so paths that
+            // differ only in case or in composed vs decomposed characters land on the same file.
+            if !seen.insert(collision_key(&f.path)) {
+                return bad(format!("case/normalisation duplicate {:?}", f.path));
             }
         }
         Ok(())
@@ -98,6 +107,12 @@ mod tests {
         assert!(m.validate().is_err());
 
         let m = Manifest::new("7dtd", 1, 0, vec![entry("Mod/A.dll"), entry("mod/a.dll")]);
+        assert!(m.validate().is_err());
+
+        // "é" as one character vs "e" plus a combining accent (macOS treats these as the same name).
+        let m = Manifest::new("7dtd", 1, 0, vec![entry("Mod/caf\u{e9}.xml"), entry("Mod/cafe\u{301}.xml")]);
+        assert!(m.validate().is_err());
+        let m = Manifest::new("7dtd", 1, 0, vec![entry("Mod/STRASSE.xml"), entry("Mod/strasse.xml")]);
         assert!(m.validate().is_err());
 
         let mut m = Manifest::new("7dtd", 1, 0, vec![entry("a")]);

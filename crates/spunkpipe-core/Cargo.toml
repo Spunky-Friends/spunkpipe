@@ -15,6 +15,7 @@ rand.workspace = true
 zstd.workspace = true
 base64.workspace = true
 hex.workspace = true
+unicode-normalization = "0.1"
 thiserror.workspace = true
 
 [dev-dependencies]
