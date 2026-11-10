@@ -1,6 +1,7 @@
 //! The background engine: polls the server, downloads updates, and applies them when the game
 //! is closed. It has no UI of its own; the tray (or a headless runner) drives it.
 
+pub mod autostart;
 pub mod config;
 pub mod daemon;
 pub mod engine;

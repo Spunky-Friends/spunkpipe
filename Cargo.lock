@@ -914,6 +914,7 @@ dependencies = [
  "clap",
  "spunkpipe-client",
  "spunkpipe-core",
+ "spunkpipe-daemon",
  "spunkpipe-profile",
  "spunkpipe-server",
  "tempfile",
