@@ -319,3 +319,34 @@ fn a_damaged_staged_file_is_not_trusted() {
     apply(&o, &p).unwrap();
     assert_eq!(read(&e.target, "M/a.xml"), "genuine content");
 }
+
+#[test]
+fn syncs_over_real_http_from_the_built_in_server() {
+    use spunkpipe_client::{HttpSource, Source};
+    use std::io::Read;
+    let e = env();
+    put(&e.src, "M/a.xml", "alpha");
+    put(&e.src, "M/big.bin", &"x".repeat(200_000));
+    do_publish(&e);
+    let srv = spunkpipe_server::serve::start(e.web.clone(), "127.0.0.1:0", 2).unwrap();
+    let base = format!("http://{}/", srv.addr);
+    let http = HttpSource::new(&base);
+
+    let r = sync(&http, &pubkey(&e), &opts(&e)).unwrap();
+    assert_eq!(r.placed, 2);
+    assert_eq!(read(&e.target, "M/a.xml"), "alpha");
+    assert!(sync(&http, &pubkey(&e), &opts(&e)).unwrap().up_to_date);
+
+    // Range requests return exactly the tail of a blob, so interrupted downloads can resume.
+    let blob = spunkpipe_core::Hash::of(b"alpha").blob_path();
+    let whole = fs::read(e.web.join(&blob)).unwrap();
+    let mut tail = Vec::new();
+    http.open(&blob, 3).unwrap().read_to_end(&mut tail).unwrap();
+    assert_eq!(tail, &whole[3..]);
+
+    // Only client paths are served, and nothing can escape the root.
+    for p in ["../Cargo.toml", ".publish-cache.json", "blobs/.tmp/x", "nope"] {
+        assert!(http.open(p, 0).is_err(), "{p} must not be served");
+    }
+    srv.stop();
+}

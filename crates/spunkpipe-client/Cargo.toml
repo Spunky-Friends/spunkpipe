@@ -12,6 +12,9 @@ serde.workspace = true
 serde_json.workspace = true
 ureq = "2"
 zstd.workspace = true
+flate2 = "1.1.11"
+tar = "0.4.46"
+zip = { version = "9.5.0", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 tempfile.workspace = true

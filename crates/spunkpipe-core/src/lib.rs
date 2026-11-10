@@ -7,6 +7,7 @@ pub mod invite;
 pub mod manifest;
 pub mod par;
 pub mod path;
+pub mod release;
 pub mod sign;
 pub mod store;
 

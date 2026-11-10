@@ -1,6 +1,7 @@
 //! The sync engine: verifies the signed manifest, downloads only what changed, and applies it.
 
 pub mod lock;
+pub mod selfupdate;
 pub mod source;
 pub mod sync;
 

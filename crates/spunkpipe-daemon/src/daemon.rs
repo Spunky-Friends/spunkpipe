@@ -109,3 +109,29 @@ pub fn join(invite: &str, game: &str, target: Option<PathBuf>, config_path: &Pat
     cfg.save(config_path)?;
     Ok(g)
 }
+
+/// Joins and does the first sync, so the mods are in place before anything else happens.
+pub fn join_and_sync(
+    invite: &str,
+    game: &str,
+    target: Option<PathBuf>,
+    config_path: &Path,
+) -> Result<(GameConfig, spunkpipe_client::Report)> {
+    let g = join(invite, game, target, config_path)?;
+    let parsed = Invite::parse(&g.invite)?;
+    let state = paths::state_dir(game).ok_or_else(|| Error::Other("cannot work out a data folder (set SPUNKPIPE_HOME)".into()))?;
+    let report = spunkpipe_client::sync(
+        &HttpSource::new(&parsed.base_url()),
+        &parsed.public_key,
+        &spunkpipe_client::SyncOptions {
+            target: g.target.clone(),
+            state,
+            game: game.to_string(),
+            serial: None,
+            verify: false,
+            dry_run: false,
+            threads: spunkpipe_core::par::default_threads(),
+        },
+    )?;
+    Ok((g, report))
+}

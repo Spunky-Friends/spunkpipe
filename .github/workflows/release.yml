@@ -1,0 +1,94 @@
+name: Release
+
+# Manual: Actions tab -> Release -> Run workflow, with the version from Cargo.toml (e.g. 0.1.0).
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to release, without a leading v (must match the workspace version)
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl }
+          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: macos-latest, target: x86_64-apple-darwin }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the version and signing key
+        run: |
+          want="${{ inputs.version }}"
+          have=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          [ "$want" = "$have" ] || { echo "Cargo.toml says $have, not $want"; exit 1; }
+          [ -s release-key.pub ] || { echo "release-key.pub is empty: add the release public key first"; exit 1; }
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - name: Install musl tools
+        if: contains(matrix.target, 'musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }} -p spunkpipe -p spunkpipe-tray
+      - name: Package
+        run: scripts/package.sh "${{ inputs.version }}" "${{ matrix.target }}" "target/${{ matrix.target }}/release" dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: dist-*
+          merge-multiple: true
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Sign the release manifest
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          [ -n "$RELEASE_SIGNING_KEY" ] || { echo "The RELEASE_SIGNING_KEY secret is not set"; exit 1; }
+          umask 077
+          printf '%s\n' "$RELEASE_SIGNING_KEY" > "$RUNNER_TEMP/release.key"
+          cargo run --release --locked -p spunkpipe -- release-manifest --dir dist --version "${{ inputs.version }}" --key "$RUNNER_TEMP/release.key"
+          rm -f "$RUNNER_TEMP/release.key"
+      - name: Checksums, installers and package files
+        run: |
+          cd dist
+          sha256sum spunkpipe-*.tar.gz spunkpipe-*.zip > SHA256SUMS
+          echo "${{ inputs.version }}" > VERSION
+          cd ..
+          cp scripts/install.sh scripts/install.ps1 dist/
+          packaging/render.sh "${{ inputs.version }}" dist/SHA256SUMS dist
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ inputs.version }}" dist/* \
+            --target "$GITHUB_SHA" \
+            --title "SpunkPipe ${{ inputs.version }}" \
+            --generate-notes

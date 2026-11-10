@@ -76,6 +76,14 @@ impl PublicKey {
             .map_err(|e| Error::BadKey(e.to_string()))
     }
 
+    /// A short, stable summary of the key for people to compare out of band, like
+    /// `a1b2-c3d4-e5f6-0718`. Show it wherever a key is about to be trusted.
+    pub fn fingerprint(&self) -> String {
+        let h = blake3::hash(&self.0.to_bytes());
+        let hex = hex::encode(&h.as_bytes()[..8]);
+        hex.as_bytes().chunks(4).map(|c| std::str::from_utf8(c).unwrap()).collect::<Vec<_>>().join("-")
+    }
+
     pub fn verify(&self, msg: &[u8], sig_b64: &str) -> Result<()> {
         let bytes = B64.decode(sig_b64.trim()).map_err(|_| Error::BadSignature)?;
         let arr: [u8; 64] = bytes.try_into().map_err(|_| Error::BadSignature)?;
@@ -97,6 +105,17 @@ mod tests {
         assert!(sk.public().verify(b"tampered", &sig).is_err());
         assert!(SecretKey::generate().public().verify(b"manifest", &sig).is_err());
         assert!(sk.public().verify(b"manifest", "not base64!").is_err());
+    }
+
+    #[test]
+    fn fingerprint_is_stable_and_distinguishes_keys() {
+        let a = SecretKey::generate().public();
+        let b = SecretKey::generate().public();
+        assert_eq!(a.fingerprint(), PublicKey::from_base64(&a.to_base64()).unwrap().fingerprint());
+        assert_ne!(a.fingerprint(), b.fingerprint());
+        let f = a.fingerprint();
+        assert_eq!(f.len(), 19);
+        assert!(f.split('-').all(|g| g.len() == 4 && g.chars().all(|c| c.is_ascii_hexdigit())));
     }
 
     #[test]

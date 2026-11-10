@@ -2,7 +2,7 @@
 //! KDE, XFCE and others show it natively; GNOME needs the AppIndicator extension. If there is
 //! no tray at all, the updater keeps running with desktop notifications only.
 
-use crate::app::{App, Refresh};
+use crate::app::{App, Exit, Refresh};
 use crate::icon;
 use crate::menu::{build_menu, needs_attention, tooltip, Item};
 use anyhow::Result;
@@ -88,14 +88,15 @@ pub fn run() -> Result<()> {
                     }
                 }
             });
-            let _ = quit.recv();
+            let why = quit.recv().unwrap_or(Exit::Quit);
             handle.shutdown().wait();
+            app.finish(why);
         }
         Err(e) => {
             eprintln!("spunkpipe-tray: no system tray available ({e}); running with notifications only");
-            let _ = quit.recv();
+            let why = quit.recv().unwrap_or(Exit::Quit);
+            app.finish(why);
         }
     }
-    app.shutdown();
     Ok(())
 }
