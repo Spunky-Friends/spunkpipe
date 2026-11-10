@@ -177,11 +177,14 @@ fn main() -> Result<()> {
             key.save_new(&keyfile).with_context(|| format!("writing {}", keyfile.display()))?;
             println!("Wrote secret key to {} (keep it private and back it up).", keyfile.display());
             println!("Public key: {}", key.public().to_base64());
+            println!("Key fingerprint: {} (friends can check this when they join)", key.public().fingerprint());
         }
         Cmd::Invite { key, host, http, game } => {
             let pk = SecretKey::load(&key)?.public();
             let inv = Invite::new(!http, &host, pk);
-            println!("{}", if let Some(g) = game { inv.with_game(&g) } else { inv });
+            let inv = if let Some(g) = game { inv.with_game(&g) } else { inv };
+            println!("{inv}");
+            eprintln!("Key fingerprint: {} (tell friends to check it when they join)", inv.public_key.fingerprint());
         }
         Cmd::Publish { source, out, key, state, game, keep, force } => {
             let state = state.unwrap_or_else(|| {
@@ -233,6 +236,12 @@ fn main() -> Result<()> {
         Cmd::Join { invite, game, target, no_autostart } => {
             let parsed = Invite::parse(&invite)?;
             let game = game.or(parsed.game.clone()).unwrap_or_else(|| "7dtd".to_string());
+            println!("Joining {} (key fingerprint {}).", parsed.host_path, parsed.public_key.fingerprint());
+            if let Some(old) = Config::load(&config_path()?)?.games.iter().find(|g| g.game == game) {
+                if old.invite != invite.trim() {
+                    println!("Note: this replaces the server you were using before ({}).", old.invite.split('#').next().unwrap_or(""));
+                }
+            }
             let (g, r) = daemon::join_and_sync(&invite, &game, target, &config_path()?)?;
             println!("Saved. Mods folder: {}", g.target.display());
             println!(
