@@ -147,7 +147,8 @@ fn manual_announces_then_waits_for_the_user() {
     wait_for(&h, "update available", |s| matches!(s.status, Status::UpdateAvailable { serial: 1, files: 1, .. }));
     std::thread::sleep(Duration::from_millis(300));
     assert!(!e.target.join("M/a.xml").exists(), "manual mode must not download by itself");
-    assert!(matches!(h.snapshot().status, Status::UpdateAvailable { .. }));
+    // Periodic re-checks briefly show "Checking"; the update must still be waiting afterwards.
+    wait_for(&h, "update still waiting", |s| matches!(s.status, Status::UpdateAvailable { .. }));
 
     h.send(Command::Update);
     wait_for(&h, "idle at 1", idle(1));

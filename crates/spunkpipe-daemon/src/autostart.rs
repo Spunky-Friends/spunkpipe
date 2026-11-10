@@ -1,7 +1,9 @@
 //! Start the tray app at login, using each OS's own mechanism and no extra dependencies.
 
 use spunkpipe_core::{Error, Result};
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(not(windows))]
+use std::path::PathBuf;
 
 #[cfg(not(windows))]
 fn home() -> Result<PathBuf> {
