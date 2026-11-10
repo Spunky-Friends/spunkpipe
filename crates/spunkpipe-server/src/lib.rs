@@ -1,5 +1,8 @@
 //! The publisher: scans a mods folder and writes a signed manifest plus blobs to a web root.
 
+pub mod serve;
+pub mod watch;
+
 use serde::{Deserialize, Serialize};
 use spunkpipe_core::{
     fsutil::atomic_write, manifest_path, signature_path, store, Error, FileEntry, Hash, Manifest,

@@ -1,5 +1,6 @@
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
+use spunkpipe_client::selfupdate::{self, Outcome, UpdateOptions};
 use spunkpipe_client::{sync, HttpSource, SyncOptions};
 use spunkpipe_core::{par::default_threads, Invite, PublicKey, SecretKey};
 use spunkpipe_daemon::{autostart, daemon, paths, Config, Daemon, Mode, Status};
@@ -30,6 +31,9 @@ enum Cmd {
         /// Serve over plain HTTP instead of HTTPS.
         #[arg(long)]
         http: bool,
+        /// Game profile the invite is for (clients assume 7dtd when absent).
+        #[arg(long)]
+        game: Option<String>,
     },
     /// Publish a mods folder: write a signed manifest and blobs to a web root.
     Publish {
@@ -80,12 +84,13 @@ enum Cmd {
     Join {
         /// The invite string you were sent.
         invite: String,
-        #[arg(long, default_value = "7dtd")]
-        game: String,
+        /// Defaults to the game named in the invite, or 7dtd.
+        #[arg(long)]
+        game: Option<String>,
         /// The managed folder. Defaults to the game's Mods folder if the install is found.
         #[arg(long)]
         target: Option<PathBuf>,
-        /// Do not register the tray app to start at login.
+        /// Do not register the tray app to start at login or to open spunkpipe:// links.
         #[arg(long)]
         no_autostart: bool,
     },
@@ -104,6 +109,51 @@ enum Cmd {
     Autostart {
         #[arg(value_parser = ["enable", "disable", "status"])]
         action: String,
+    },
+    /// Make `spunkpipe://` links open the tray app (or stop doing so).
+    UrlHandler {
+        #[arg(value_parser = ["enable", "disable", "status"])]
+        action: String,
+    },
+    /// Update SpunkPipe itself to the newest signed release.
+    Update {
+        /// Only say whether an update exists.
+        #[arg(long)]
+        check: bool,
+        /// Fetch releases from here instead of GitHub (mirrors, testing).
+        #[arg(long)]
+        base_url: Option<String>,
+    },
+    /// Serve a published folder over HTTP, optionally re-publishing when the mods change.
+    Serve {
+        /// The web root written by `publish`.
+        #[arg(long)]
+        root: PathBuf,
+        #[arg(long, default_value = "0.0.0.0:8080")]
+        listen: String,
+        /// Re-publish this folder whenever it changes and then stays quiet.
+        #[arg(long, requires = "key")]
+        watch: Option<PathBuf>,
+        #[arg(long)]
+        key: Option<PathBuf>,
+        #[arg(long)]
+        state: Option<PathBuf>,
+        #[arg(long, default_value = "7dtd")]
+        game: String,
+        #[arg(long, default_value_t = 10)]
+        keep: usize,
+        /// Seconds the folder must stay unchanged before it is published.
+        #[arg(long, default_value_t = 30)]
+        quiet: u64,
+    },
+    /// (For release builds) Write the signed release manifest for the archives in a folder.
+    ReleaseManifest {
+        #[arg(long)]
+        dir: PathBuf,
+        #[arg(long)]
+        version: String,
+        #[arg(long)]
+        key: PathBuf,
     },
     /// List built-in game profiles.
     Profiles,
@@ -128,9 +178,10 @@ fn main() -> Result<()> {
             println!("Wrote secret key to {} (keep it private and back it up).", keyfile.display());
             println!("Public key: {}", key.public().to_base64());
         }
-        Cmd::Invite { key, host, http } => {
+        Cmd::Invite { key, host, http, game } => {
             let pk = SecretKey::load(&key)?.public();
-            println!("{}", Invite::new(!http, &host, pk));
+            let inv = Invite::new(!http, &host, pk);
+            println!("{}", if let Some(g) = game { inv.with_game(&g) } else { inv });
         }
         Cmd::Publish { source, out, key, state, game, keep, force } => {
             let state = state.unwrap_or_else(|| {
@@ -180,15 +231,10 @@ fn main() -> Result<()> {
             }
         }
         Cmd::Join { invite, game, target, no_autostart } => {
-            let g = daemon::join(&invite, &game, target, &config_path()?)?;
+            let parsed = Invite::parse(&invite)?;
+            let game = game.or(parsed.game.clone()).unwrap_or_else(|| "7dtd".to_string());
+            let (g, r) = daemon::join_and_sync(&invite, &game, target, &config_path()?)?;
             println!("Saved. Mods folder: {}", g.target.display());
-            let parsed = Invite::parse(&g.invite)?;
-            let state = paths::state_dir(&game).context("cannot work out a data folder")?;
-            let r = sync(
-                &HttpSource::new(&parsed.base_url()),
-                &parsed.public_key,
-                &SyncOptions { target: g.target.clone(), state, game: game.clone(), serial: None, verify: false, dry_run: false, threads: default_threads() },
-            )?;
             println!(
                 "Synced to serial {}: {} files placed, {} unchanged, {} backed up.",
                 r.serial, r.placed, r.unchanged, r.backed_up
@@ -197,6 +243,9 @@ fn main() -> Result<()> {
                 match tray_binary() {
                     Some(t) => {
                         autostart::enable(&t)?;
+                        if let Err(e) = autostart::register_url_handler(&t) {
+                            println!("Could not register spunkpipe:// links: {e}");
+                        }
                         println!("The tray app will start at login. Start it now with: {}", t.display());
                     }
                     None => println!("Tray app not found next to this program; run `spunkpipe run` for background updates."),
@@ -268,6 +317,72 @@ fn main() -> Result<()> {
             }
             _ => println!("{}", if autostart::is_enabled() { "enabled" } else { "disabled" }),
         },
+        Cmd::UrlHandler { action } => match action.as_str() {
+            "enable" => {
+                let t = tray_binary().context("spunkpipe-tray not found next to this program")?;
+                autostart::register_url_handler(&t)?;
+                println!("spunkpipe:// links will open the tray app.");
+            }
+            "disable" => {
+                autostart::unregister_url_handler()?;
+                println!("Disabled.");
+            }
+            _ => println!("{}", if autostart::url_handler_registered() { "enabled" } else { "disabled" }),
+        },
+        Cmd::Update { check, base_url } => {
+            let key = selfupdate::release_key()?;
+            let target = selfupdate::current_target().context("no release is published for this platform")?;
+            let install_dir = std::env::current_exe()?.parent().context("cannot find the install folder")?.to_path_buf();
+            let source = HttpSource::new(base_url.as_deref().unwrap_or(selfupdate::DEFAULT_BASE_URL));
+            let opts = UpdateOptions {
+                key,
+                current_version: selfupdate::CURRENT_VERSION.to_string(),
+                target: target.to_string(),
+                install_dir,
+                check_only: check,
+            };
+            match selfupdate::update(&source, &opts)? {
+                Outcome::UpToDate { version } => println!("Already up to date (version {version})."),
+                Outcome::Available { version } => println!("Version {version} is available. Run `spunkpipe update` to install it."),
+                Outcome::Updated { from, to } => println!("Updated from {from} to {to}. Restart the tray app to use it."),
+            }
+        }
+        Cmd::Serve { root, listen, watch, key, state, game, keep, quiet } => {
+            let running = spunkpipe_server::serve::start(root.clone(), &listen, 8)?;
+            println!("Serving {} on http://{}", root.display(), running.addr);
+            if let (Some(src), Some(key)) = (watch, key) {
+                let secret = SecretKey::load(&key).context("loading signing key")?;
+                let state = state.unwrap_or_else(|| {
+                    let mut s = key.clone().into_os_string();
+                    s.push(".state");
+                    PathBuf::from(s)
+                });
+                let opts = PublishOptions { source: src.clone(), out: root, state, game, key: secret, force: false, keep, threads: default_threads() };
+                println!("Watching {} (publishes after {quiet}s of quiet)", src.display());
+                std::thread::spawn(move || {
+                    spunkpipe_server::watch::watch(
+                        &opts,
+                        std::time::Duration::from_secs(quiet),
+                        std::time::Duration::from_secs(5),
+                        &std::sync::atomic::AtomicBool::new(false),
+                        |r| match r {
+                            Ok(r) if r.published => println!("Published serial {} ({} files)", r.serial, r.files),
+                            Ok(_) => {}
+                            Err(e) => eprintln!("publish failed: {e}"),
+                        },
+                    )
+                });
+            }
+            running.wait();
+        }
+        Cmd::ReleaseManifest { dir, version, key } => {
+            let key = SecretKey::load(&key).context("loading release signing key")?;
+            let m = spunkpipe_core::release::ReleaseManifest::from_dir(&dir, &version)?;
+            let bytes = m.to_bytes()?;
+            std::fs::write(dir.join(spunkpipe_core::release::RELEASE_FILE), &bytes)?;
+            std::fs::write(dir.join(spunkpipe_core::release::RELEASE_SIG_FILE), key.sign(&bytes))?;
+            println!("Signed release {} with {} archives.", m.version, m.assets.len());
+        }
         Cmd::Profiles => {
             for id in spunkpipe_profile::builtin_ids() {
                 let p = spunkpipe_profile::builtin(id).unwrap();

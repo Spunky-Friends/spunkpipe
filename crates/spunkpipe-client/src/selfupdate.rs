@@ -139,7 +139,7 @@ fn read_tar_gz(data: &[u8]) -> Result<Files> {
     let mut out = Vec::new();
     let mut ar = tar::Archive::new(flate2::read::GzDecoder::new(Cursor::new(data)));
     for e in ar.entries()? {
-        let mut e = e?;
+        let e = e?;
         if !e.header().entry_type().is_file() {
             continue;
         }
