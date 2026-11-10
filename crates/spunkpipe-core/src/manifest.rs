@@ -14,6 +14,8 @@ pub struct FileEntry {
     pub hash: Hash,
     /// Uncompressed size in bytes.
     pub size: u64,
+    /// Size of the compressed blob in bytes (what a client actually downloads).
+    pub stored: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -89,7 +91,7 @@ mod tests {
     use super::*;
 
     fn entry(p: &str) -> FileEntry {
-        FileEntry { path: p.into(), hash: Hash::of(p.as_bytes()), size: 1 }
+        FileEntry { path: p.into(), hash: Hash::of(p.as_bytes()), size: 1, stored: 1 }
     }
 
     #[test]

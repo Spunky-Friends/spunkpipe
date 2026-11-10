@@ -23,8 +23,8 @@ impl<R: Read> Read for HashingReader<R> {
 }
 
 /// Hashes `src` and writes its compressed blob into `store_root` unless the blob already exists.
-/// Returns the content hash, the size and whether a new blob was written.
-pub fn add_file(store_root: &Path, src: &Path) -> Result<(Hash, u64, bool)> {
+/// Returns the content hash, the size, the compressed size and whether a new blob was written.
+pub fn add_file(store_root: &Path, src: &Path) -> Result<(Hash, u64, u64, bool)> {
     let tmp_dir = store_root.join("blobs").join(".tmp");
     fs::create_dir_all(&tmp_dir)?;
     let tmp = tmp_dir.join(format!("{}-{}", std::process::id(), rand_suffix()));
@@ -42,11 +42,12 @@ pub fn add_file(store_root: &Path, src: &Path) -> Result<(Hash, u64, bool)> {
     let dest = store_root.join(hash.blob_path());
     if dest.exists() {
         fs::remove_file(&tmp)?;
-        return Ok((hash, reader.count, false));
+        return Ok((hash, reader.count, fs::metadata(&dest)?.len(), false));
     }
+    let stored = fs::metadata(&tmp)?.len();
     fs::create_dir_all(dest.parent().unwrap())?;
     fs::rename(&tmp, &dest)?;
-    Ok((hash, reader.count, true))
+    Ok((hash, reader.count, stored, true))
 }
 
 fn rand_suffix() -> u64 {
@@ -92,11 +93,12 @@ mod tests {
         fs::write(&src, &data).unwrap();
         let store = dir.path().join("store");
 
-        let (h, size, new) = add_file(&store, &src).unwrap();
+        let (h, size, stored, new) = add_file(&store, &src).unwrap();
         assert!(new);
+        assert_eq!(stored, fs::metadata(store.join(h.blob_path())).unwrap().len());
         assert_eq!(size, data.len() as u64);
         assert_eq!(h, Hash::of(&data));
-        let (h2, _, new2) = add_file(&store, &src).unwrap();
+        let (h2, _, _, new2) = add_file(&store, &src).unwrap();
         assert_eq!(h2, h);
         assert!(!new2);
 
@@ -111,7 +113,7 @@ mod tests {
         let src = dir.path().join("f");
         fs::write(&src, b"hello world").unwrap();
         let store = dir.path().join("s");
-        let (h, size, _) = add_file(&store, &src).unwrap();
+        let (h, size, _, _) = add_file(&store, &src).unwrap();
         let blob = store.join(h.blob_path());
         let out = dir.path().join("o");
 
