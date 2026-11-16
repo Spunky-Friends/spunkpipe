@@ -25,6 +25,17 @@ pub fn fingerprint(source: &Path) -> Result<[u8; 32]> {
     Ok(*h.finalize().as_bytes())
 }
 
+/// The source folder's fingerprint plus the exclude list's contents, so editing the list is
+/// noticed too.
+fn state_of(opts: &PublishOptions) -> Option<[u8; 32]> {
+    let mut h = blake3::Hasher::new();
+    h.update(&fingerprint(&opts.source).ok()?);
+    if let Some(f) = &opts.exclude {
+        h.update(&std::fs::read(f).unwrap_or_default());
+    }
+    Some(*h.finalize().as_bytes())
+}
+
 /// Publishes once straight away, then again whenever the folder changes and then stays still for
 /// `quiet`. Runs until `stop` is set. `on_result` is called after each publish attempt.
 pub fn watch(
@@ -35,11 +46,11 @@ pub fn watch(
     on_result: impl Fn(&Result<PublishResult>),
 ) {
     on_result(&publish(opts));
-    let mut seen = fingerprint(&opts.source).ok();
+    let mut seen = state_of(opts);
     let mut changed_at: Option<Instant> = None;
     while !stop.load(Ordering::Relaxed) {
         std::thread::sleep(poll);
-        let now = fingerprint(&opts.source).ok();
+        let now = state_of(opts);
         if now != seen {
             seen = now;
             changed_at = Some(Instant::now());
@@ -73,6 +84,7 @@ mod tests {
             force: false,
             keep: 5,
             threads: 2,
+            exclude: None,
         };
         let stop = Arc::new(AtomicBool::new(false));
         let published = Arc::new(AtomicUsize::new(0));

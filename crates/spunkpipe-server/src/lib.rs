@@ -3,6 +3,7 @@
 pub mod serve;
 pub mod watch;
 
+use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use serde::{Deserialize, Serialize};
 use spunkpipe_core::{
     fsutil::atomic_write, manifest_path, signature_path, store, Error, FileEntry, Hash, Manifest,
@@ -29,6 +30,9 @@ pub struct PublishOptions {
     /// Number of old manifests to keep for rollback.
     pub keep: usize,
     pub threads: usize,
+    /// A file of patterns for things to leave out of the published set (see [`load_excludes`]).
+    /// Read on every publish, so edits take effect without a restart.
+    pub exclude: Option<PathBuf>,
 }
 
 #[derive(Debug)]
@@ -68,6 +72,21 @@ fn read_serial(out: &Path) -> Result<Option<u64>> {
     }
 }
 
+/// Reads an exclude list: one pattern per line, in `.gitignore` style, relative to the source
+/// folder. Blank lines and lines starting with `#` are ignored. `Name` matches a file or folder
+/// of that name anywhere, `/Name` only at the top, `Name/` only folders, `*.log` by wildcard, and
+/// a leading `!` re-includes something an earlier line left out.
+pub fn load_excludes(source: &Path, file: &Path) -> Result<Gitignore> {
+    let text = fs::read_to_string(file)
+        .map_err(|e| Error::Other(format!("reading exclude list {}: {e}", file.display())))?;
+    let mut b = GitignoreBuilder::new(source);
+    for (i, line) in text.lines().enumerate() {
+        b.add_line(None, line)
+            .map_err(|e| Error::Other(format!("{} line {}: {e}", file.display(), i + 1)))?;
+    }
+    b.build().map_err(|e| Error::Other(format!("{}: {e}", file.display())))
+}
+
 struct Scanned {
     rel: String,
     abs: PathBuf,
@@ -75,9 +94,16 @@ struct Scanned {
     mtime: u128,
 }
 
-fn scan(source: &Path) -> Result<Vec<Scanned>> {
+fn scan(source: &Path, excludes: Option<&Gitignore>) -> Result<Vec<Scanned>> {
     let mut out = Vec::new();
-    for entry in WalkDir::new(source).follow_links(false).sort_by_file_name() {
+    let walk = WalkDir::new(source).follow_links(false).sort_by_file_name().into_iter().filter_entry(|e| {
+        // An excluded folder is skipped whole, so nothing inside it is read, hashed or validated.
+        e.depth() == 0
+            || excludes.is_none_or(|g| {
+                e.path().strip_prefix(source).is_ok_and(|rel| !g.matched(rel, e.file_type().is_dir()).is_ignore())
+            })
+    });
+    for entry in walk {
         let entry = entry.map_err(|e| Error::Other(e.to_string()))?;
         let ft = entry.file_type();
         if ft.is_dir() {
@@ -120,7 +146,8 @@ pub fn publish(opts: &PublishOptions) -> Result<PublishResult> {
         .and_then(|b| serde_json::from_slice(&b).ok())
         .unwrap_or_default();
 
-    let scanned = scan(&opts.source)?;
+    let excludes = opts.exclude.as_deref().map(|f| load_excludes(&opts.source, f)).transpose()?;
+    let scanned = scan(&opts.source, excludes.as_ref())?;
     let results = spunkpipe_core::par::par_map(&scanned, opts.threads, |s| -> Result<(FileEntry, bool)> {
         if let Some(&(size, mtime, hash, stored)) = cache.entries.get(&s.rel) {
             if size == s.size && mtime == s.mtime && opts.out.join(hash.blob_path()).exists() {
@@ -236,7 +263,7 @@ mod tests {
 
     fn opts(src: &Path, out: &Path, key: SecretKey) -> PublishOptions {
         let state = out.parent().unwrap().join("pubstate");
-        PublishOptions { source: src.into(), out: out.into(), state, game: "7dtd".into(), key, force: false, keep: 2, threads: 4 }
+        PublishOptions { source: src.into(), out: out.into(), state, game: "7dtd".into(), key, force: false, keep: 2, threads: 4, exclude: None }
     }
 
     #[test]
@@ -280,5 +307,47 @@ mod tests {
         assert!(out.join(manifest_path(3)).exists() && out.join(manifest_path(4)).exists());
         assert!(!out.join(first_blob.unwrap()).exists());
         assert!(out.join(Hash::of(b"version 3").blob_path()).exists());
+    }
+
+    #[test]
+    fn exclude_list_leaves_things_out_and_changes_republish() {
+        let d = tempfile::tempdir().unwrap();
+        let (src, out) = (d.path().join("src"), d.path().join("out"));
+        for (p, c) in [
+            ("Keep/ModInfo.xml", "k"),
+            ("ServerOnly/ModInfo.xml", "s"),
+            ("Keep/Config/secret.xml", "x"),
+            ("Keep/debug.log", "l"),
+            ("Nested/ServerOnly/a.txt", "n"),
+        ] {
+            fs::create_dir_all(src.join(p).parent().unwrap()).unwrap();
+            fs::write(src.join(p), c).unwrap();
+        }
+        // A name Windows cannot store, inside an excluded folder, must not stop the publish.
+        fs::write(src.join("ServerOnly/bad:name.txt"), "b").unwrap();
+        let list = d.path().join("exclude.txt");
+        fs::write(&list, "# server side only\n/ServerOnly/\n*.log\nKeep/Config/secret.xml\n").unwrap();
+        let key = SecretKey::generate().to_base64();
+        let mk = || {
+            let mut o = opts(&src, &out, SecretKey::from_base64(&key).unwrap());
+            o.exclude = Some(list.clone());
+            o
+        };
+        let r = publish(&mk()).unwrap();
+        assert_eq!(r.files, 2, "Keep/ModInfo.xml and Nested/ServerOnly/a.txt (anchored pattern only hits the top)");
+        let m = Manifest::from_bytes(&fs::read(out.join(manifest_path(r.serial))).unwrap()).unwrap();
+        let paths: Vec<_> = m.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, ["Keep/ModInfo.xml", "Nested/ServerOnly/a.txt"]);
+
+        // Editing the list republishes even though no file changed.
+        fs::write(&list, "ServerOnly/\n*.log\nKeep/Config/secret.xml\n").unwrap();
+        let r2 = publish(&mk()).unwrap();
+        assert!(r2.published);
+        assert_eq!(r2.files, 1);
+
+        // A missing list is an error, not "publish everything".
+        let mut o = mk();
+        o.exclude = Some(d.path().join("nope.txt"));
+        assert!(publish(&o).is_err());
     }
 }

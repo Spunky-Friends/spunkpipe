@@ -57,6 +57,10 @@ enum Cmd {
         /// Publish even if nothing changed.
         #[arg(long)]
         force: bool,
+        /// A file listing things to leave out (one `.gitignore`-style pattern per line, relative
+        /// to the source folder). Defaults to `<key>.exclude` next to the key file, if it exists.
+        #[arg(long)]
+        exclude: Option<PathBuf>,
     },
     /// Make the local mods folder match the server.
     Sync {
@@ -145,6 +149,9 @@ enum Cmd {
         /// Seconds the folder must stay unchanged before it is published.
         #[arg(long, default_value_t = 30)]
         quiet: u64,
+        /// Exclude list, as for `publish`. Defaults to `<key>.exclude` if it exists.
+        #[arg(long)]
+        exclude: Option<PathBuf>,
     },
     /// (For release builds) Write the signed release manifest for the archives in a folder.
     ReleaseManifest {
@@ -186,14 +193,15 @@ fn main() -> Result<()> {
             println!("{inv}");
             eprintln!("Key fingerprint: {} (tell friends to check it when they join)", inv.public_key.fingerprint());
         }
-        Cmd::Publish { source, out, key, state, game, keep, force } => {
+        Cmd::Publish { source, out, key, state, game, keep, force, exclude } => {
+            let exclude = exclude_list(exclude, &key)?;
             let state = state.unwrap_or_else(|| {
                 let mut s = key.clone().into_os_string();
                 s.push(".state");
                 PathBuf::from(s)
             });
             let key = SecretKey::load(&key).context("loading signing key")?;
-            let r = publish(&PublishOptions { source, out, state, game, key, force, keep, threads: default_threads() })?;
+            let r = publish(&PublishOptions { source, out, state, game, key, force, keep, threads: default_threads(), exclude })?;
             if r.published {
                 println!("Published serial {} ({} files, {} new blobs)", r.serial, r.files, r.new_blobs);
             } else {
@@ -356,7 +364,7 @@ fn main() -> Result<()> {
                 Outcome::Updated { from, to } => println!("Updated from {from} to {to}. Restart the tray app to use it."),
             }
         }
-        Cmd::Serve { root, listen, watch, key, state, game, keep, quiet } => {
+        Cmd::Serve { root, listen, watch, key, state, game, keep, quiet, exclude } => {
             let running = spunkpipe_server::serve::start(root.clone(), &listen, 8)?;
             println!("Serving {} on http://{}", root.display(), running.addr);
             if let (Some(src), Some(key)) = (watch, key) {
@@ -366,7 +374,8 @@ fn main() -> Result<()> {
                     s.push(".state");
                     PathBuf::from(s)
                 });
-                let opts = PublishOptions { source: src.clone(), out: root, state, game, key: secret, force: false, keep, threads: default_threads() };
+                let exclude = exclude_list(exclude, &key)?;
+                let opts = PublishOptions { source: src.clone(), out: root, state, game, key: secret, force: false, keep, threads: default_threads(), exclude };
                 println!("Watching {} (publishes after {quiet}s of quiet)", src.display());
                 std::thread::spawn(move || {
                     spunkpipe_server::watch::watch(
@@ -400,4 +409,26 @@ fn main() -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Picks the exclude list: the one given, else `<key>.exclude` if that file exists. A list that was
+/// asked for but is missing is an error, so a typo can never quietly publish everything.
+fn exclude_list(given: Option<PathBuf>, key: &std::path::Path) -> Result<Option<PathBuf>> {
+    let path = match given {
+        Some(p) => p,
+        None => {
+            let mut s = key.to_path_buf().into_os_string();
+            s.push(".exclude");
+            let p = PathBuf::from(s);
+            if !p.is_file() {
+                return Ok(None);
+            }
+            p
+        }
+    };
+    if !path.is_file() {
+        anyhow::bail!("exclude list {} does not exist", path.display());
+    }
+    println!("Leaving out what {} lists", path.display());
+    Ok(Some(path))
 }
