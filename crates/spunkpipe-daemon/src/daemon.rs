@@ -4,6 +4,7 @@ use crate::game::{GameProbe, NeverRunning, ProcessProbe};
 use crate::paths;
 use spunkpipe_client::HttpSource;
 use spunkpipe_core::{Error, Invite, Result};
+use spunkpipe_profile::{Choice, ModFolder};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -97,22 +98,60 @@ pub fn target_for_game_dir(game: &str, game_dir: &Path) -> Result<PathBuf> {
     Ok(game_dir.join(&p.managed_dir))
 }
 
+/// The outcome of looking for a game's mods folder on this machine.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Detected {
+    /// One folder is clearly the right one.
+    Found(PathBuf),
+    /// The user has to choose: several folders could be right, or none were found (empty list).
+    Ask(Vec<ModFolder>),
+}
+
+/// Looks for the folder to manage: one that already holds mods wins, then the install folder.
+pub fn detect_target(game: &str) -> Result<Detected> {
+    let p = spunkpipe_profile::builtin(game)
+        .ok_or_else(|| Error::Other(format!("unknown game {game:?}; pass --target <the mods folder>")))?;
+    Ok(match p.choose_mods_folder() {
+        Choice::Use(f) => Detected::Found(f.path),
+        Choice::Ask(list) => Detected::Ask(list),
+    })
+}
+
+/// Refuses a managed folder that could only be a mistake: a relative path, a drive or filesystem
+/// root, or the home folder itself. SpunkPipe writes whole mod folders into it.
+pub fn validate_target(target: &Path) -> Result<()> {
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from);
+    if !target.is_absolute() || target.parent().is_none() || home.as_deref() == Some(target) {
+        return Err(Error::Other(format!(
+            "{} is not a mods folder. Choose the game's Mods folder, not a drive or your home folder",
+            target.display()
+        )));
+    }
+    Ok(())
+}
+
 /// Adds (or replaces) a game in the config from an invite. Does not download anything.
 pub fn join(invite: &str, game: &str, target: Option<PathBuf>, config_path: &Path) -> Result<GameConfig> {
     Invite::parse(invite)?;
     let target = match target {
         Some(t) => t,
-        None => {
-            let p = spunkpipe_profile::builtin(game)
-                .ok_or_else(|| Error::Other(format!("unknown game {game:?}; pass --target <the mods folder>")))?;
-            let install = p
-                .detect_installs()
-                .into_iter()
-                .next()
-                .ok_or_else(|| Error::Other(format!("could not find a {} install. Say where it is with --game-dir <the game's folder> (or --target <its Mods folder>)", p.name)))?;
-            install.join(&p.managed_dir)
-        }
+        None => match detect_target(game)? {
+            Detected::Found(p) => p,
+            Detected::Ask(list) if list.is_empty() => {
+                return Err(Error::Other(
+                    "could not find the game. Say where it is with --game-dir <the game's folder> (or --target <its Mods folder>)".into(),
+                ))
+            }
+            Detected::Ask(list) => {
+                let places: Vec<String> = list.iter().map(|f| f.path.display().to_string()).collect();
+                return Err(Error::Other(format!(
+                    "found more than one place for mods ({}). Choose one with --target <folder>",
+                    places.join(", ")
+                )));
+            }
+        },
     };
+    validate_target(&target)?;
     let g = GameConfig { game: game.to_string(), invite: invite.trim().to_string(), target, mode: Mode::Auto, poll_secs: 300 };
     let mut cfg = Config::load(config_path)?;
     cfg.upsert(g.clone());
@@ -149,6 +188,17 @@ pub fn join_and_sync(
 #[cfg(test)]
 mod game_dir_tests {
     use super::*;
+
+    #[test]
+    fn a_root_a_relative_path_or_the_home_folder_is_not_a_mods_folder() {
+        let d = tempfile::tempdir().unwrap();
+        assert!(validate_target(&d.path().join("Mods")).is_ok());
+        assert!(validate_target(Path::new("/")).is_err());
+        assert!(validate_target(Path::new("Mods")).is_err());
+        if let Some(h) = std::env::var_os("HOME") {
+            assert!(validate_target(Path::new(&h)).is_err());
+        }
+    }
 
     #[test]
     fn mods_folder_comes_from_the_game_folder() {

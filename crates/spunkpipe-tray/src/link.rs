@@ -1,10 +1,10 @@
 //! Joining from a clicked `spunkpipe://` link, only after the user agrees.
 
 use crate::app::notify;
-use crate::confirm::{ask, prompt_text, Answer};
+use crate::confirm::{ask, pick_folder, prompt_text, Answer, Picked};
 use anyhow::{bail, Context, Result};
 use spunkpipe_core::Invite;
-use spunkpipe_daemon::{daemon, paths, Config};
+use spunkpipe_daemon::{daemon, paths, Config, Detected, ModFolder};
 
 pub fn is_link(arg: &str) -> bool {
     arg.starts_with("spunkpipe://") || arg.starts_with("spunkpipe+http://")
@@ -34,6 +34,30 @@ pub fn plan(invite: &Invite, game: &str, existing: &Config) -> Result<Plan> {
         .context("that link points at a server name SpunkPipe will not show or trust automatically")
 }
 
+/// Asks the user where their mods folder is, in a folder chooser that starts at our best guess.
+/// `None` means they cancelled.
+fn choose_folder(found: &[ModFolder], url: &str) -> Result<Option<std::path::PathBuf>> {
+    let title = if found.is_empty() {
+        "SpunkPipe could not find the game. Choose the game's Mods folder"
+    } else {
+        "SpunkPipe found more than one Mods folder. Choose the one to keep in step with the server"
+    };
+    let start = found.first().map(|f| f.path.as_path());
+    match pick_folder(title, start) {
+        Picked::Folder(p) => {
+            if !p.is_dir() {
+                bail!("{} is not a folder", p.display());
+            }
+            daemon::validate_target(&p)?;
+            Ok(Some(p))
+        }
+        Picked::Cancelled => Ok(None),
+        Picked::Unavailable => bail!(
+            "SpunkPipe cannot show a folder chooser here. In a terminal, run: spunkpipe join '{url}' --target <your Mods folder>"
+        ),
+    }
+}
+
 /// Saves the invite and does the first sync, telling the user what is happening.
 pub fn join_from_link(url: &str) -> Result<()> {
     let invite = Invite::parse(url).context("that is not a valid SpunkPipe invite")?;
@@ -50,9 +74,19 @@ pub fn join_from_link(url: &str) -> Result<()> {
             ),
         }
     }
+    let target = match daemon::detect_target(&game)? {
+        Detected::Found(p) => p,
+        Detected::Ask(found) => match choose_folder(&found, url)? {
+            Some(p) => p,
+            None => {
+                notify("SpunkPipe", "Setup cancelled: no mods folder was chosen. Click the link again to retry.");
+                return Ok(());
+            }
+        },
+    };
     notify("SpunkPipe", "Setting up your mods. This can take a minute.");
-    let (g, r) = daemon::join_and_sync(url, &game, None, &config_path)
-        .context("could not set up. If the game is not in the usual place, run `spunkpipe join` with --game-dir <the game's folder>")?;
+    let (g, r) = daemon::join_and_sync(url, &game, Some(target), &config_path)
+        .context("could not set up. In a terminal, run `spunkpipe join` with --target <your Mods folder>")?;
     notify(
         "SpunkPipe",
         &format!("Ready: {} files installed in {}. SpunkPipe will keep them up to date.", r.placed + r.unchanged, g.target.display()),

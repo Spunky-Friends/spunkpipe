@@ -41,9 +41,22 @@ instead of the tray on machines with no desktop.
 
 ### Where the game's mods folder is
 
-SpunkPipe looks for the game in Steam's default folder and in every Steam library you have set up
-(including ones on other drives), and manages the game's `Mods` folder inside it. Tell it where
-to look instead with either of these, on `join` or `sync`:
+**7 Days to Die loads mods from two places**: the `Mods` folder in the game's install folder, and a
+`Mods` folder in the game's user-data folder. SpunkPipe looks in both (including every Steam library you
+have set up, and the Proton prefix on Linux):
+
+| System | User-data folder |
+|---|---|
+| Linux (native) | `~/.local/share/7DaysToDie/Mods` |
+| Linux (Proton) | `<steam library>/steamapps/compatdata/251570/pfx/drive_c/users/steamuser/AppData/Roaming/7DaysToDie/Mods` |
+| Windows | `%APPDATA%\7DaysToDie\Mods` |
+
+It keeps the folder that already holds your mods. On a fresh install with no mods anywhere it uses the
+install folder's `Mods`. **If it cannot tell** (mods in more than one place, two installs, or no game
+found), it asks you the first time you sync: the tray shows a folder chooser, and `spunkpipe join` in a
+terminal lists the folders it found. Nothing is downloaded until you have chosen.
+
+You can also say where it is yourself, on `join` or `sync`:
 
 ```bash
 spunkpipe join "<invite>" --game-dir "/path/to/7 Days To Die"   # the game's install folder
@@ -52,16 +65,6 @@ spunkpipe join "<invite>" --target   "/path/to/Mods"            # the Mods folde
 
 To point an already-joined game somewhere else: `spunkpipe folder "/path/to/7 Days To Die"`. Nothing
 is removed from the old folder.
-
-**7 Days to Die loads mods from two places**: the `Mods` folder in the install folder, and a `Mods`
-folder in the game's user-data folder. If your mods are in the second one, use `--target` with it.
-SpunkPipe does not look there on its own. Typical user-data folders:
-
-| System | Folder |
-|---|---|
-| Linux (native) | `~/.local/share/7DaysToDie/Mods` |
-| Linux (Proton) | `<steam library>/steamapps/compatdata/251570/pfx/drive_c/users/steamuser/AppData/Roaming/7DaysToDie/Mods` |
-| Windows | `%APPDATA%\7DaysToDie\Mods` |
 
 Pick one place and use it everywhere: the same mod in both folders makes the game load it twice.
 

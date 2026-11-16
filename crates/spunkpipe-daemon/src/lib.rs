@@ -9,6 +9,7 @@ pub mod game;
 pub mod paths;
 
 pub use config::{Config, GameConfig, Mode};
-pub use daemon::Daemon;
+pub use daemon::{Daemon, Detected};
+pub use spunkpipe_profile::{FolderKind, ModFolder};
 pub use engine::{Command, Engine, EngineConfig, Handle, Snapshot, Status};
 pub use game::{GameProbe, NeverRunning, ProcessProbe};

@@ -39,13 +39,59 @@ pub fn ask(text: &str) -> Answer {
     imp::ask(text)
 }
 
+/// The result of asking the user to pick a folder.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Picked {
+    Folder(std::path::PathBuf),
+    Cancelled,
+    /// No way to show a folder chooser on this machine.
+    Unavailable,
+}
+
+/// Shows the system's folder chooser, starting at `start` if given.
+pub fn pick_folder(title: &str, start: Option<&std::path::Path>) -> Picked {
+    imp::pick_folder(title, start)
+}
+
+/// Turns a chooser program's exit status and output into a result.
+fn picked(success: bool, stdout: &[u8]) -> Picked {
+    let s = String::from_utf8_lossy(stdout);
+    let s = s.trim();
+    if success && !s.is_empty() {
+        Picked::Folder(std::path::PathBuf::from(s))
+    } else {
+        Picked::Cancelled
+    }
+}
+
 #[cfg(all(unix, not(target_os = "macos")))]
 mod imp {
-    use super::Answer;
+    use super::{Answer, Picked};
+    use std::path::Path;
     use std::process::{Command, Stdio};
 
     fn has(cmd: &str) -> bool {
         Command::new(cmd).arg("--version").stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok()
+    }
+
+    pub fn pick_folder(title: &str, start: Option<&Path>) -> Picked {
+        let start = start.map(|p| format!("{}/", p.display()));
+        let out = if has("zenity") {
+            let mut c = Command::new("zenity");
+            c.args(["--file-selection", "--directory", "--title", title]);
+            if let Some(s) = &start {
+                c.args(["--filename", s]);
+            }
+            c.output()
+        } else if has("kdialog") {
+            Command::new("kdialog").args(["--title", title, "--getexistingdirectory", start.as_deref().unwrap_or(".")]).output()
+        } else {
+            return Picked::Unavailable;
+        };
+        match out {
+            Ok(o) => super::picked(o.status.success(), &o.stdout),
+            Err(_) => Picked::Unavailable,
+        }
     }
 
     pub fn ask(text: &str) -> Answer {
@@ -69,8 +115,25 @@ mod imp {
 
 #[cfg(target_os = "macos")]
 mod imp {
-    use super::Answer;
+    use super::{Answer, Picked};
+    use std::path::Path;
     use std::process::Command;
+
+    fn esc(s: &str) -> String {
+        s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', " ")
+    }
+
+    pub fn pick_folder(title: &str, start: Option<&Path>) -> Picked {
+        let default = start
+            .filter(|p| p.is_dir())
+            .map(|p| format!(" default location POSIX file \"{}\"", esc(&p.display().to_string())))
+            .unwrap_or_default();
+        let script = format!("POSIX path of (choose folder with prompt \"{}\"{default})", esc(title));
+        match Command::new("osascript").args(["-e", &script]).output() {
+            Ok(o) => super::picked(o.status.success(), &o.stdout),
+            Err(_) => Picked::Unavailable,
+        }
+    }
 
     pub fn ask(text: &str) -> Answer {
         // The text only ever contains plain ASCII from `prompt_text`, but escape anyway.
@@ -88,8 +151,27 @@ mod imp {
 
 #[cfg(windows)]
 mod imp {
-    use super::Answer;
+    use super::{Answer, Picked};
+    use std::path::Path;
     use std::process::Command;
+
+    pub fn pick_folder(title: &str, start: Option<&Path>) -> Picked {
+        // Title and start folder go through environment variables so they are never parsed as code.
+        let script = "Add-Type -AssemblyName System.Windows.Forms; \
+            $d = New-Object System.Windows.Forms.FolderBrowserDialog; \
+            $d.Description = $env:SPUNKPIPE_TITLE; \
+            if ($env:SPUNKPIPE_START) { $d.SelectedPath = $env:SPUNKPIPE_START }; \
+            if ($d.ShowDialog() -eq 'OK') { [Console]::Out.Write($d.SelectedPath); exit 0 } else { exit 1 }";
+        let out = Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Sta", "-Command", script])
+            .env("SPUNKPIPE_TITLE", title)
+            .env("SPUNKPIPE_START", start.map(|p| p.display().to_string()).unwrap_or_default())
+            .output();
+        match out {
+            Ok(o) => super::picked(o.status.success(), &o.stdout),
+            Err(_) => Picked::Unavailable,
+        }
+    }
 
     pub fn ask(text: &str) -> Answer {
         // The text goes through an environment variable so it is never parsed as code.
@@ -120,6 +202,13 @@ mod tests {
         let t = prompt_text("evil.example", "7dtd", "0000-0000-0000-0000", Some("mods.spunky.boats")).unwrap();
         assert!(t.starts_with("WARNING"));
         assert!(t.contains("mods.spunky.boats"));
+    }
+
+    #[test]
+    fn a_chosen_folder_comes_back_trimmed_and_a_cancel_is_a_cancel() {
+        assert_eq!(picked(true, b"/data/Mods\n"), Picked::Folder("/data/Mods".into()));
+        assert_eq!(picked(true, b"  \n"), Picked::Cancelled);
+        assert_eq!(picked(false, b"/data/Mods\n"), Picked::Cancelled);
     }
 
     #[test]
