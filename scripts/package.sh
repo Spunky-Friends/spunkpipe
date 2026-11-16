@@ -20,6 +20,8 @@ case "$target" in
 esac
 
 mkdir -p "$out"
+# The archive is written from inside a temporary folder, so the output path must be absolute.
+out=$(cd "$out" && pwd)
 name="spunkpipe-$version-$target"
 case "$target" in
   *windows*)
@@ -30,4 +32,6 @@ case "$target" in
     ;;
 esac
 rm -rf "$stage"
-echo "built $name"
+archive=$(ls "$out/$name".* 2>/dev/null | head -1)
+[ -n "$archive" ] && [ -s "$archive" ] || { echo "packaging failed: no archive for $name in $out" >&2; exit 1; }
+echo "built $archive"
