@@ -19,42 +19,52 @@ first. You need an invite from the server owner to get started.
 
 ## Install
 
-### Windows
+**Easiest:** if the server owner sent you a ready-made command that already contains your invite, paste
+that into a terminal and you are done. Otherwise follow these two steps. Step 1 can be pasted exactly as
+it is.
 
-Open PowerShell and paste this, with your invite in place of `spunkpipe://...`:
+### Step 1: install
+
+**Windows**, in PowerShell:
 
 ```powershell
-& ([scriptblock]::Create((irm https://github.com/Spunky-Friends/spunkpipe/releases/latest/download/install.ps1))) -Invite 'spunkpipe://...'
+& ([scriptblock]::Create((irm https://github.com/Spunky-Friends/spunkpipe/releases/latest/download/install.ps1)))
 ```
 
-It downloads SpunkPipe, checks it, installs it to `%LOCALAPPDATA%\Programs\SpunkPipe`, downloads your
-mods and sets itself to start when you log in.
+**Linux and macOS**, in a terminal:
 
-**Installing by hand instead.** Download `spunkpipe-<version>-x86_64-pc-windows-msvc.zip` from the
-[releases page](https://github.com/Spunky-Friends/spunkpipe/releases/latest) and then:
+```bash
+curl -fsSL https://github.com/Spunky-Friends/spunkpipe/releases/latest/download/install.sh | sh
+```
+
+This downloads SpunkPipe, checks it, and installs it. Nothing is changed in your game yet.
+
+### Step 2: join the server
+
+Close the game. Then use the invite the server owner sent you. It is a link starting with `spunkpipe://`.
+Paste it between the quotes, replacing `PASTE-YOUR-INVITE-HERE`:
+
+```powershell
+& "$env:LOCALAPPDATA\Programs\SpunkPipe\spunkpipe.exe" join "PASTE-YOUR-INVITE-HERE"
+```
+
+On Linux and macOS:
+
+```bash
+~/.local/bin/spunkpipe join "PASTE-YOUR-INVITE-HERE"
+```
+
+That is the one part only you can fill in: the invite is specific to the server you are joining.
+
+**Installing the Windows version by hand instead.** Download `spunkpipe-<version>-x86_64-pc-windows-msvc.zip`
+from the [releases page](https://github.com/Spunky-Friends/spunkpipe/releases/latest), then:
 
 1. Unzip it to a folder you will keep, such as `%LOCALAPPDATA%\Programs\SpunkPipe`. Do not run it from
    Downloads: if you delete the folder later, SpunkPipe stops working.
-2. Open PowerShell in that folder and run `.\spunkpipe.exe join "spunkpipe://..."` with your invite.
+2. Do step 2 above, using the `spunkpipe.exe` in that folder.
 3. Start `spunkpipe-tray.exe` once. From then on it starts by itself when you log in.
 
 Windows may warn that the program is from an unknown publisher. Choose **More info**, then **Run anyway**.
-
-### Linux and macOS
-
-```bash
-curl -fsSL https://github.com/Spunky-Friends/spunkpipe/releases/latest/download/install.sh | sh -s -- --invite 'spunkpipe://...'
-```
-
-### Without an invite
-
-Leave the invite part out to only install, then run this later:
-
-```bash
-spunkpipe join 'spunkpipe://...'
-```
-
-On Windows, open a new terminal first (the installer adds SpunkPipe to your PATH).
 
 ## Your first sync
 
