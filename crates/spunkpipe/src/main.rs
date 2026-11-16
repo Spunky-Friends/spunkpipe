@@ -71,6 +71,9 @@ enum Cmd {
         /// The managed folder. Defaults to the game's Mods folder if the install is found.
         #[arg(long)]
         target: Option<PathBuf>,
+        /// The folder the game is installed in (its Mods folder is worked out from this).
+        #[arg(long, conflicts_with = "target")]
+        game_dir: Option<PathBuf>,
         /// Where SpunkPipe keeps its lock file and backups.
         #[arg(long)]
         state: Option<PathBuf>,
@@ -94,9 +97,20 @@ enum Cmd {
         /// The managed folder. Defaults to the game's Mods folder if the install is found.
         #[arg(long)]
         target: Option<PathBuf>,
+        /// The folder the game is installed in (its Mods folder is worked out from this).
+        /// Use this if the game is not in a place SpunkPipe finds on its own.
+        #[arg(long, conflicts_with = "target")]
+        game_dir: Option<PathBuf>,
         /// Do not register the tray app to start at login or to open spunkpipe:// links.
         #[arg(long)]
         no_autostart: bool,
+    },
+    /// Point an already-joined game at a different install folder.
+    Folder {
+        /// The folder the game is installed in, e.g. /data2/SteamLibrary/steamapps/common/7 Days To Die
+        game_dir: PathBuf,
+        #[arg(long, default_value = "7dtd")]
+        game: String,
     },
     /// Run the background updater without a tray icon (servers, or desktops with no tray).
     Run,
@@ -208,15 +222,19 @@ fn main() -> Result<()> {
                 println!("Nothing changed; still at serial {} ({} files)", r.serial, r.files);
             }
         }
-        Cmd::Sync { invite, game, target, state, serial, verify, dry_run } => {
+        Cmd::Sync { invite, game, target, game_dir, state, serial, verify, dry_run } => {
             let invite = Invite::parse(&invite)?;
+            let target = match game_dir {
+                Some(d) => Some(daemon::target_for_game_dir(&game, &d)?),
+                None => target,
+            };
             let profile = spunkpipe_profile::builtin(&game);
             let target = match target {
                 Some(t) => t,
                 None => {
                     let Some(p) = &profile else { bail!("unknown game {game:?}; pass --target") };
                     let Some(install) = p.detect_installs().into_iter().next() else {
-                        bail!("could not find a {} install; pass --target", p.name)
+                        bail!("could not find a {} install; pass --game-dir <the game's folder> or --target <its Mods folder>", p.name)
                     };
                     install.join(&p.managed_dir)
                 }
@@ -241,9 +259,13 @@ fn main() -> Result<()> {
                 );
             }
         }
-        Cmd::Join { invite, game, target, no_autostart } => {
+        Cmd::Join { invite, game, target, game_dir, no_autostart } => {
             let parsed = Invite::parse(&invite)?;
             let game = game.or(parsed.game.clone()).unwrap_or_else(|| "7dtd".to_string());
+            let target = match game_dir {
+                Some(d) => Some(daemon::target_for_game_dir(&game, &d)?),
+                None => target,
+            };
             println!("Joining {} (key fingerprint {}).", parsed.host_path, parsed.public_key.fingerprint());
             if let Some(old) = Config::load(&config_path()?)?.games.iter().find(|g| g.game == game) {
                 if old.invite != invite.trim() {
@@ -321,6 +343,18 @@ fn main() -> Result<()> {
             g.mode = m;
             cfg.save(&path)?;
             println!("{game} is now {mode}. The tray menu changes it live; a running `spunkpipe run` needs a restart.");
+        }
+        Cmd::Folder { game_dir, game } => {
+            let target = daemon::target_for_game_dir(&game, &game_dir)?;
+            let path = config_path()?;
+            let mut cfg = Config::load(&path)?;
+            let Some(g) = cfg.games.iter_mut().find(|g| g.game == game) else { bail!("{game} is not configured; run `spunkpipe join` first") };
+            let old = std::mem::replace(&mut g.target, target.clone());
+            cfg.save(&path)?;
+            println!("{game} now keeps {} in step with the server.", target.display());
+            if old != target {
+                println!("Nothing was removed from the old folder ({}). Run `spunkpipe sync` or use \"Check now\" in the tray to fill the new one.", old.display());
+            }
         }
         Cmd::Autostart { action } => match action.as_str() {
             "enable" => {

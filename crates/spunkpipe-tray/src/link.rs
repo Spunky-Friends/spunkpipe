@@ -52,7 +52,7 @@ pub fn join_from_link(url: &str) -> Result<()> {
     }
     notify("SpunkPipe", "Setting up your mods. This can take a minute.");
     let (g, r) = daemon::join_and_sync(url, &game, None, &config_path)
-        .context("could not set up. If the game is not in the usual place, run `spunkpipe join` with --target")?;
+        .context("could not set up. If the game is not in the usual place, run `spunkpipe join` with --game-dir <the game's folder>")?;
     notify(
         "SpunkPipe",
         &format!("Ready: {} files installed in {}. SpunkPipe will keep them up to date.", r.placed + r.unchanged, g.target.display()),
