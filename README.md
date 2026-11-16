@@ -9,13 +9,13 @@ is on Linux.
 Running a server? See [docs/server.md](docs/server.md). Working on SpunkPipe? See
 [docs/development.md](docs/development.md).
 
-## What you need
+## How it works
 
-- The game installed (the Steam version of 7 Days to Die).
-- An **invite** from whoever runs the server. It looks like `spunkpipe://mods.example.com?game=7dtd#...`.
-  They should also tell you the **key fingerprint** (four groups of letters and numbers) so you can check
-  it matches when SpunkPipe shows it to you.
-- The game closed while you do the first sync.
+The server owner publishes their mods folder as a signed list of files. SpunkPipe on your computer
+compares that list with your `Mods` folder and downloads only the files that are missing or different.
+Everything is checked against the server's signature before it is used, and new files are only put in place
+while the game is closed. Your own extra mods are left alone, and anything of yours it replaces is backed up
+first. You need an invite from the server owner to get started.
 
 ## Install
 
