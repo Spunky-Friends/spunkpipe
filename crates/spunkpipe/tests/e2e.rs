@@ -48,6 +48,7 @@ fn do_publish(e: &Env) -> u64 {
         key: SecretKey::from_base64(&e.key).unwrap(),
         force: false,
         keep: 10,
+        exclude: None,
         threads: 4,
     })
     .unwrap()

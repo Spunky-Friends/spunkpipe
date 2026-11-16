@@ -21,6 +21,7 @@ zstd = "0.13"
 base64 = "0.22"
 hex = "0.4"
 walkdir = "2"
+ignore = "0.4"
 clap = { version = "4", features = ["derive"] }
 tempfile = "3"
 toml = "0.8"

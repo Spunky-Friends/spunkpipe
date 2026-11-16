@@ -35,6 +35,23 @@ The tray menu offers Automatic updates, Ask me before downloading, or Paused, pl
 Downloads are staged first and only swapped in once the game is closed. Use `spunkpipe run`
 instead of the tray on machines with no desktop.
 
+### Leaving things out
+
+To keep server-only mods (or anything else) away from friends, put patterns in `~/spunkpipe.key.exclude`
+(the key file's name plus `.exclude`), or point at another file with `--exclude`. It is read on every
+publish and stays on the server. One pattern per line, `.gitignore` style, relative to the mods folder:
+
+```
+# server-side only
+/CurryGiveSkillPoints/
+*.log
+```
+
+`Name` matches a file or folder of that name anywhere, `/Name` only at the top level, `Name/` only
+folders, and a leading `!` brings back something an earlier line left out. Excluded folders are not
+read at all. If you add a pattern for something already published, friends' copies are removed on
+their next sync (backed up first). A list you ask for with `--exclude` that does not exist is an error.
+
 ### Serving it yourself
 
 If you have no web server, `spunkpipe serve --root /var/www/spunkpipe --listen 0.0.0.0:8080` serves the
