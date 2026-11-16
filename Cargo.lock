@@ -2522,7 +2522,7 @@ dependencies = [
 
 [[package]]
 name = "spunkpipe"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -2536,7 +2536,7 @@ dependencies = [
 
 [[package]]
 name = "spunkpipe-client"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "flate2",
  "serde",
@@ -2551,7 +2551,7 @@ dependencies = [
 
 [[package]]
 name = "spunkpipe-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64",
  "blake3",
@@ -2569,7 +2569,7 @@ dependencies = [
 
 [[package]]
 name = "spunkpipe-daemon"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "spunkpipe-client",
@@ -2584,7 +2584,7 @@ dependencies = [
 
 [[package]]
 name = "spunkpipe-profile"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "thiserror 2.0.21",
@@ -2593,7 +2593,7 @@ dependencies = [
 
 [[package]]
 name = "spunkpipe-server"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "blake3",
  "ignore",
@@ -2607,7 +2607,7 @@ dependencies = [
 
 [[package]]
 name = "spunkpipe-tray"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "ksni",
