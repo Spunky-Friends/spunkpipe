@@ -87,6 +87,16 @@ impl Daemon {
     }
 }
 
+/// Works out the managed folder (for 7 Days to Die: `Mods`) from the folder the game is
+/// installed in. For users whose game is somewhere SpunkPipe does not look.
+pub fn target_for_game_dir(game: &str, game_dir: &Path) -> Result<PathBuf> {
+    let p = spunkpipe_profile::builtin(game).ok_or_else(|| Error::Other(format!("unknown game {game:?}")))?;
+    if !game_dir.is_dir() {
+        return Err(Error::Other(format!("{} is not a folder", game_dir.display())));
+    }
+    Ok(game_dir.join(&p.managed_dir))
+}
+
 /// Adds (or replaces) a game in the config from an invite. Does not download anything.
 pub fn join(invite: &str, game: &str, target: Option<PathBuf>, config_path: &Path) -> Result<GameConfig> {
     Invite::parse(invite)?;
@@ -94,12 +104,12 @@ pub fn join(invite: &str, game: &str, target: Option<PathBuf>, config_path: &Pat
         Some(t) => t,
         None => {
             let p = spunkpipe_profile::builtin(game)
-                .ok_or_else(|| Error::Other(format!("unknown game {game:?}; pass the mods folder explicitly")))?;
+                .ok_or_else(|| Error::Other(format!("unknown game {game:?}; pass --target <the mods folder>")))?;
             let install = p
                 .detect_installs()
                 .into_iter()
                 .next()
-                .ok_or_else(|| Error::Other(format!("could not find a {} install; pass the mods folder explicitly", p.name)))?;
+                .ok_or_else(|| Error::Other(format!("could not find a {} install. Say where it is with --game-dir <the game's folder> (or --target <its Mods folder>)", p.name)))?;
             install.join(&p.managed_dir)
         }
     };
@@ -134,4 +144,17 @@ pub fn join_and_sync(
         },
     )?;
     Ok((g, report))
+}
+
+#[cfg(test)]
+mod game_dir_tests {
+    use super::*;
+
+    #[test]
+    fn mods_folder_comes_from_the_game_folder() {
+        let d = tempfile::tempdir().unwrap();
+        assert_eq!(target_for_game_dir("7dtd", d.path()).unwrap(), d.path().join("Mods"));
+        assert!(target_for_game_dir("7dtd", &d.path().join("missing")).is_err());
+        assert!(target_for_game_dir("nope", d.path()).is_err());
+    }
 }

@@ -2,6 +2,7 @@ id = "7dtd"
 name = "7 Days to Die"
 steam_app_id = 251570
 managed_dir = "Mods"
+steam_dir = "7 Days To Die"
 process_names = ["7DaysToDie", "7DaysToDie.exe", "7DaysToDie.x86_64", "7DaysToDieServer.x86_64"]
 
 [[install_candidates]]
