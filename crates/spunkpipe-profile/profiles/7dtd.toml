@@ -3,6 +3,8 @@ name = "7 Days to Die"
 steam_app_id = 251570
 managed_dir = "Mods"
 steam_dir = "7 Days To Die"
+# Where Proton keeps the game's user-data Mods folder, inside the prefix's steamuser folder.
+proton_user_mods = "AppData/Roaming/7DaysToDie/Mods"
 process_names = ["7DaysToDie", "7DaysToDie.exe", "7DaysToDie.x86_64", "7DaysToDieServer.x86_64"]
 
 [[install_candidates]]
@@ -20,3 +22,16 @@ path = "C:/Program Files (x86)/Steam/steamapps/common/7 Days To Die"
 [[install_candidates]]
 os = "macos"
 path = "~/Library/Application Support/Steam/steamapps/common/7 Days To Die"
+
+# The game also loads mods from a Mods folder in its user-data folder.
+[[user_data_candidates]]
+os = "linux"
+path = "~/.local/share/7DaysToDie/Mods"
+
+[[user_data_candidates]]
+os = "windows"
+path = "%APPDATA%/7DaysToDie/Mods"
+
+[[user_data_candidates]]
+os = "macos"
+path = "~/Library/Application Support/7DaysToDie/Mods"

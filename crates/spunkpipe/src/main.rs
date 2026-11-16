@@ -180,6 +180,64 @@ enum Cmd {
     Profiles,
 }
 
+/// Finds the folder to manage. If it cannot tell, asks in the terminal (even when the program was
+/// started from a pipe, as the installer does) and otherwise explains how to say.
+fn ask_for_target(game: &str) -> Result<PathBuf> {
+    use spunkpipe_daemon::Detected;
+    let list = match daemon::detect_target(game)? {
+        Detected::Found(p) => return Ok(p),
+        Detected::Ask(list) => list,
+    };
+    println!();
+    if list.is_empty() {
+        println!("SpunkPipe could not find the game's mods folder.");
+    } else {
+        println!("SpunkPipe found more than one place for mods:");
+        for (i, f) in list.iter().enumerate() {
+            println!("  {}) {}  ({} mods, {})", i + 1, f.path.display(), f.mods, f.kind.label());
+        }
+    }
+    let Some(answer) = read_terminal_line(if list.is_empty() {
+        "Paste the path of the game's Mods folder: "
+    } else {
+        "Type a number, or paste the path of the Mods folder to keep in step with the server: "
+    }) else {
+        bail!("cannot ask here. Run again with --target <the Mods folder> (or --game-dir <the game's folder>)")
+    };
+    let answer = answer.trim().trim_matches(|c| c == '"' || c == '\'');
+    if let Some(f) = answer.parse::<usize>().ok().and_then(|n| n.checked_sub(1)).and_then(|i| list.get(i)) {
+        return Ok(f.path.clone());
+    }
+    if answer.is_empty() {
+        bail!("no folder chosen");
+    }
+    let path = PathBuf::from(answer);
+    if !path.is_dir() {
+        bail!("{} is not a folder that exists", path.display());
+    }
+    Ok(path)
+}
+
+/// Prints a prompt and reads one line from the terminal. Uses /dev/tty on Unix so it still works
+/// when standard input is the installer script.
+fn read_terminal_line(prompt: &str) -> Option<String> {
+    use std::io::{BufRead, IsTerminal, Write};
+    print!("{prompt}");
+    std::io::stdout().flush().ok()?;
+    let mut line = String::new();
+    #[cfg(unix)]
+    if let Ok(tty) = std::fs::File::open("/dev/tty") {
+        std::io::BufReader::new(tty).read_line(&mut line).ok()?;
+        return Some(line);
+    }
+    if std::io::stdin().is_terminal() {
+        std::io::stdin().lock().read_line(&mut line).ok()?;
+        return Some(line);
+    }
+    println!();
+    None
+}
+
 fn config_path() -> Result<PathBuf> {
     paths::config_file().context("cannot work out a config folder; set SPUNKPIPE_HOME")
 }
@@ -228,17 +286,11 @@ fn main() -> Result<()> {
                 Some(d) => Some(daemon::target_for_game_dir(&game, &d)?),
                 None => target,
             };
-            let profile = spunkpipe_profile::builtin(&game);
             let target = match target {
                 Some(t) => t,
-                None => {
-                    let Some(p) = &profile else { bail!("unknown game {game:?}; pass --target") };
-                    let Some(install) = p.detect_installs().into_iter().next() else {
-                        bail!("could not find a {} install; pass --game-dir <the game's folder> or --target <its Mods folder>", p.name)
-                    };
-                    install.join(&p.managed_dir)
-                }
+                None => ask_for_target(&game)?,
             };
+            daemon::validate_target(&target)?;
             let state = match state {
                 Some(s) => s,
                 None => paths::state_dir(&game).context("cannot work out a data folder; pass --state")?,
@@ -267,6 +319,11 @@ fn main() -> Result<()> {
                 None => target,
             };
             println!("Joining {} (key fingerprint {}).", parsed.host_path, parsed.public_key.fingerprint());
+            let target = match target {
+                Some(t) => t,
+                None => ask_for_target(&game)?,
+            };
+            let target = Some(target);
             if let Some(old) = Config::load(&config_path()?)?.games.iter().find(|g| g.game == game) {
                 if old.invite != invite.trim() {
                     println!("Note: this replaces the server you were using before ({}).", old.invite.split('#').next().unwrap_or(""));

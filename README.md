@@ -1,93 +1,158 @@
 # SpunkPipe
 
-Keeps your friends' game mods in sync with your game server. Fast, small, open source.
+Keeps your game mods the same as your friend's server. You install it once, and it downloads
+only what changed, from then on.
 
-**Status: early development.** First target is 7 Days to Die. Builds for Linux, macOS and Windows; most testing so far is on Linux.
+**Status: early development.** Works with 7 Days to Die on Linux, Windows and macOS. Most testing so far
+is on Linux.
 
-## How it works
+Running a server? See [docs/server.md](docs/server.md). Working on SpunkPipe? See
+[docs/development.md](docs/development.md).
 
-- The server owner runs `spunkpipe publish` against the server's mods folder. It writes a signed
-  manifest and content-addressed blobs to a directory that any web server can serve.
-- Friends install SpunkPipe, paste an invite (`spunkpipe://host#publickey`), and the client keeps
-  their mods folder matching the server. Only changed files are downloaded.
-- Your own extra mods are left alone. A file at the same path as one of the server's but with
-  different contents is replaced with the server's, after your copy is saved to a backup folder (see
-  [What happens to your files](#what-happens-to-your-files)).
+## What you need
 
-## Using it
+- The game installed (the Steam version of 7 Days to Die).
+- An **invite** from whoever runs the server. It looks like `spunkpipe://mods.example.com?game=7dtd#...`.
+  They should also tell you the **key fingerprint** (four groups of letters and numbers) so you can check
+  it matches when SpunkPipe shows it to you.
+- The game closed while you do the first sync.
 
-Server owner:
+## Install
 
-```bash
-spunkpipe keygen ~/spunkpipe.key
-spunkpipe publish --source /path/to/server/Mods --out /var/www/spunkpipe --key ~/spunkpipe.key
-spunkpipe invite --key ~/spunkpipe.key --host mods.example.com
+### Windows
+
+Open PowerShell and paste this, with your invite in place of `spunkpipe://...`:
+
+```powershell
+& ([scriptblock]::Create((irm https://github.com/Spunky-Friends/spunkpipe/releases/latest/download/install.ps1))) -Invite 'spunkpipe://...'
 ```
 
-Serve `/var/www/spunkpipe` over HTTPS with any web server, and send friends the invite.
+It downloads SpunkPipe, checks it, installs it to `%LOCALAPPDATA%\Programs\SpunkPipe`, downloads your
+mods and sets itself to start when you log in.
 
-Friends:
+**Installing by hand instead.** Download `spunkpipe-<version>-x86_64-pc-windows-msvc.zip` from the
+[releases page](https://github.com/Spunky-Friends/spunkpipe/releases/latest) and then:
+
+1. Unzip it to a folder you will keep, such as `%LOCALAPPDATA%\Programs\SpunkPipe`. Do not run it from
+   Downloads: if you delete the folder later, SpunkPipe stops working.
+2. Open PowerShell in that folder and run `.\spunkpipe.exe join "spunkpipe://..."` with your invite.
+3. Start `spunkpipe-tray.exe` once. From then on it starts by itself when you log in.
+
+Windows may warn that the program is from an unknown publisher. Choose **More info**, then **Run anyway**.
+
+### Linux and macOS
 
 ```bash
-spunkpipe join "spunkpipe://mods.example.com#<publickey>"
+curl -fsSL https://github.com/Spunky-Friends/spunkpipe/releases/latest/download/install.sh | sh -s -- --invite 'spunkpipe://...'
 ```
 
-That saves the invite, does the first sync and registers `spunkpipe-tray` to start at login.
-If it says it cannot find the game, or your mods live somewhere else, see
-[Where the game's mods folder is](#where-the-games-mods-folder-is).
-The tray menu offers Automatic updates, Ask me before downloading, or Paused, plus "Check now".
-Downloads are staged first and only swapped in once the game is closed. Use `spunkpipe run`
-instead of the tray on machines with no desktop.
+### Without an invite
 
-### Where the game's mods folder is
+Leave the invite part out to only install, then run this later:
 
-SpunkPipe looks for the game in Steam's default folder and in every Steam library you have set up
-(including ones on other drives), and manages the game's `Mods` folder inside it. Tell it where
-to look instead with either of these, on `join` or `sync`:
+```bash
+spunkpipe join 'spunkpipe://...'
+```
+
+On Windows, open a new terminal first (the installer adds SpunkPipe to your PATH).
+
+## Your first sync
+
+1. SpunkPipe finds the game and its mods folder. If it cannot tell which folder to use, it asks you to
+   choose one (see [Which folder](#which-folder)). Nothing is downloaded until you have chosen.
+2. It downloads only the files you do not already have. If you already have the server's mods, this takes
+   seconds.
+3. It adds a small tray icon, and starts it at login.
+
+When it says **Synced**, start the game.
+
+### If you click an invite link instead
+
+If SpunkPipe is already installed, clicking a `spunkpipe://` link opens a window showing the server and
+its key fingerprint. **Check the fingerprint matches what the server owner told you.** Mods can run
+programs on your computer, so a link never sets anything up without you saying yes.
+
+## Day to day
+
+The tray icon has:
+
+- **Automatic updates**: updates download in the background and are put in place when the game is closed.
+  This is the default.
+- **Ask me before downloading**: it tells you when there is an update and waits.
+- **Paused**: does nothing until you change it back.
+- **Check now**: looks for an update straight away.
+
+Updates are never swapped in while the game is running. On a machine with no desktop (or no tray), run
+`spunkpipe run` instead.
+
+## Which folder
+
+7 Days to Die loads mods from two places: the `Mods` folder in the game's install folder, and a `Mods`
+folder in its user-data folder. SpunkPipe looks in both, including every Steam library you have set up and
+the Proton prefix on Linux:
+
+| System | User-data folder |
+|---|---|
+| Linux (native) | `~/.local/share/7DaysToDie/Mods` |
+| Linux (Proton) | `<steam library>/steamapps/compatdata/251570/pfx/drive_c/users/steamuser/AppData/Roaming/7DaysToDie/Mods` |
+| Windows | `%APPDATA%\7DaysToDie\Mods` |
+| macOS | `~/Library/Application Support/7DaysToDie/Mods` |
+
+It keeps the folder that already holds your mods. On a fresh install with no mods anywhere, it uses the
+install folder's `Mods`. **If it cannot tell** (mods in more than one place, two installs, or no game
+found), it asks you on your first sync: the tray shows a folder chooser, and `spunkpipe join` in a terminal
+lists the folders it found.
+
+To say where it is yourself:
 
 ```bash
 spunkpipe join "<invite>" --game-dir "/path/to/7 Days To Die"   # the game's install folder
 spunkpipe join "<invite>" --target   "/path/to/Mods"            # the Mods folder itself
 ```
 
-To point an already-joined game somewhere else: `spunkpipe folder "/path/to/7 Days To Die"`. Nothing
-is removed from the old folder.
+To point an already-joined game somewhere else: `spunkpipe folder "/path/to/7 Days To Die"`. Nothing is
+removed from the old folder.
 
-**7 Days to Die loads mods from two places**: the `Mods` folder in the install folder, and a `Mods`
-folder in the game's user-data folder. If your mods are in the second one, use `--target` with it.
-SpunkPipe does not look there on its own. Typical user-data folders:
+Use one place only. The same mod in both folders makes the game load it twice.
 
-| System | Folder |
-|---|---|
-| Linux (native) | `~/.local/share/7DaysToDie/Mods` |
-| Linux (Proton) | `<steam library>/steamapps/compatdata/251570/pfx/drive_c/users/steamuser/AppData/Roaming/7DaysToDie/Mods` |
-| Windows | `%APPDATA%\7DaysToDie\Mods` |
+## What happens to your files
 
-Pick one place and use it everywhere: the same mod in both folders makes the game load it twice.
-
-### What happens to your files
-
-- **Only what changed is downloaded.** Every file in the folder is compared by hash with the server's
-  list. Matching files are skipped, so joining with mods you already have costs almost nothing.
-- **Changes are staged first.** The tray and `spunkpipe run` only move them into place once the game
-  is closed. `join` and `sync` apply straight away, so close the game first.
+- **Only what changed is downloaded.** Every file in the folder is compared with the server's list.
+  Matching files are skipped.
+- **Your own extra mods are left alone.** SpunkPipe never touches a file the server has never had.
 - **A file that differs from the server's is replaced**, and your copy is saved first in
-  `backup/<timestamp>/` inside SpunkPipe's data folder. The same applies when the server removes a file
-  you have changed. Files the server has never had are never touched.
-- **Local edits to published files don't stick.** The server's copy wins on the next sync.
-  Settings that must differ per player belong in the server's exclude list (see below).
+  `backup/<timestamp>/` inside SpunkPipe's data folder (below). The same goes for a file the server removes
+  that you have changed.
+- **Local edits to server mods do not stick.** The server's copy wins on the next sync. If a setting must be
+  different for you, ask the server owner to leave that file out.
+- **Downloads are staged first.** The tray and `spunkpipe run` only move them into place once the game is
+  closed. `join` and `sync` apply straight away, so close the game first.
 
-SpunkPipe keeps its files here:
+SpunkPipe keeps its own files here:
 
-| | Config | Data (lock file, staging, backups) |
+| | Settings | Data (lock file, staging, backups) |
 |---|---|---|
 | Linux | `~/.config/spunkpipe/config.toml` | `~/.local/share/spunkpipe/<game>/` |
 | macOS | `~/Library/Application Support/spunkpipe/config.toml` | `~/Library/Application Support/spunkpipe/<game>/` |
 | Windows | `%APPDATA%\spunkpipe\config.toml` | `%APPDATA%\spunkpipe\<game>\` |
 
-Set `SPUNKPIPE_HOME` to keep everything in one folder instead.
+## Troubleshooting
 
-### Commands
+- **"could not find a 7 Days to Die install"**: tell it where the game is with `--game-dir` or `--target`
+  (see [Which folder](#which-folder)).
+- **It is downloading a huge amount**: it is probably pointed at a folder that does not hold your mods.
+  Stop it (close the window or press Ctrl+C), then join again with the right `--target`. Nothing is moved
+  into the game folder until the download is complete.
+- **A mod setting keeps going back**: the server publishes that file. Ask the server owner to leave it out.
+- **The game loads a mod twice**: the mod is in both `Mods` folders. Delete one copy.
+- **Clicking the link opens a web search, or nothing happens**: SpunkPipe is not installed yet, or has not
+  registered itself for links. Install it, then run `spunkpipe url-handler enable`.
+- **I want to undo an update**: `spunkpipe sync --invite "<invite>" --serial N` goes back to an older
+  version. Your replaced files are also in the `backup` folder.
+
+## Commands
+
+You will rarely need these. The tray does the day-to-day work.
 
 | Command | What it does |
 |---|---|
@@ -99,120 +164,9 @@ Set `SPUNKPIPE_HOME` to keep everything in one folder instead.
 | `spunkpipe run` | The background updater without a tray icon |
 | `spunkpipe autostart` / `url-handler` | Start at login / open `spunkpipe://` links, `enable` or `disable` |
 | `spunkpipe update` | Update SpunkPipe itself. `--check` only reports |
-| `spunkpipe keygen`, `invite`, `publish`, `serve` | For the server owner |
 
-### Troubleshooting
-
-- **"could not find a 7 Days to Die install"**: pass `--game-dir` or `--target` as above.
-- **It downloaded far more than expected**: it was probably pointed at a folder that does not hold your
-  mods (see the user-data folder note above). Stop it, then join again with the right `--target`.
-  Nothing is moved into the game folder until the download is complete.
-- **A mod setting keeps reverting**: the server publishes that file. Ask the server owner to exclude it.
-
-### Leaving things out
-
-To keep server-only mods (or anything else) away from friends, put patterns in `~/spunkpipe.key.exclude`
-(the key file's name plus `.exclude`), or point at another file with `--exclude`. It is read on every
-publish and stays on the server. One pattern per line, `.gitignore` style, relative to the mods folder:
-
-```
-# server-side only
-/CurryGiveSkillPoints/
-*.log
-```
-
-`Name` matches a file or folder of that name anywhere, `/Name` only at the top level, `Name/` only
-folders, and a leading `!` brings back something an earlier line left out. Excluded folders are not
-read at all. If you add a pattern for something already published, friends' copies are removed on
-their next sync (backed up first). A list you ask for with `--exclude` that does not exist is an error.
-
-### Running the server
-
-Publishing is just files in a folder, so any static web server works. Put the folder behind HTTPS and
-allow only `GET` of `latest`, `manifests/` and `blobs/`. Blobs never change once written, so they
-can be cached for a long time. Example for nginx:
-
-```nginx
-limit_conn_zone $binary_remote_addr zone=mods_conn:10m;
-limit_req_zone  $binary_remote_addr zone=mods_req:10m rate=300r/s;
-
-server {
-    listen 443 ssl;
-    server_name mods.example.com;
-    root /var/www/spunkpipe;
-    autoindex off;
-    limit_conn mods_conn 64;                    # a first sync opens up to 16 connections
-    limit_req  zone=mods_req burst=1000 nodelay; # and thousands of small requests
-    location = /latest        { add_header Cache-Control "no-cache"; default_type text/plain; }
-    location ^~ /manifests/   { add_header Cache-Control "public, max-age=3600"; }
-    location ^~ /blobs/       { add_header Cache-Control "public, max-age=31536000, immutable"; }
-    location /                { return 404; }
-}
-```
-
-Keep rate limits loose: the first sync of a large modpack is thousands of requests from one address.
-Do not put a download-size cap or a CDN that forbids large non-web files in front of it.
-
-To publish on a schedule, run `spunkpipe publish` from a systemd timer (or cron). It reads the mods
-folder, writes only what changed, and does nothing when nothing did. Run it as a user that can **read**
-the mods folder and write the web root, and keep the key and its state folder out of the web root.
-Wait until the mods folder has been still for a minute before publishing, so a mod that is still being
-copied in is not published half-finished.
-
-If you have no web server, `spunkpipe serve --root /var/www/spunkpipe --listen 0.0.0.0:8080` serves the
-published folder (read-only, with resumable downloads). Add `--watch /path/to/Mods --key ~/spunkpipe.key`
-to re-publish automatically once the mods folder has been quiet for 30 seconds. Put a reverse proxy in
-front of it if you want HTTPS.
-
-## Install
-
-Linux and macOS:
-
-```bash
-curl -fsSL https://github.com/Spunky-Friends/spunkpipe/releases/latest/download/install.sh | sh -s -- --invite 'spunkpipe://...'
-```
-
-Windows (PowerShell):
-
-```powershell
-& ([scriptblock]::Create((irm https://github.com/Spunky-Friends/spunkpipe/releases/latest/download/install.ps1))) -Invite 'spunkpipe://...'
-```
-
-Leave the invite out to just install, then run `spunkpipe join '<invite>'` later. Update with
-`spunkpipe update`; it only accepts releases signed with SpunkPipe's release key, and never downgrades.
-Each release also publishes ready-to-submit Homebrew, winget and AUR package files.
-
-### Invite links
-
-`spunkpipe invite` prints the invite and a key fingerprint. Clicking a `spunkpipe://` link asks you to
-confirm the server and the fingerprint first (mods are code, so a link must never join a server on its
-own), and warns if it would replace the server you already use. Check the fingerprint with whoever sent
-you the link.
-
-## Making a release (maintainers)
-
-1. `spunkpipe keygen release.key`, commit the public key line to `release-key.pub`, and store the secret
-   key's contents as the repository secret `RELEASE_SIGNING_KEY`. Keep a backup: lose it and installed
-   copies can no longer be updated.
-2. Set the version in `Cargo.toml`, merge, then run **Actions, Release** with that version.
-
-The workflows only run when started by hand (Actions, then CI or Release), so nothing runs, or is billed,
-on every push. Run CI before merging a change you are unsure about.
-
-It builds Linux (musl), macOS (Apple Silicon and Intel) and Windows, signs `release.json`, and publishes
-the archives, `SHA256SUMS`, the install scripts and the package files.
-
-## Layout
-
-| Crate | Purpose |
-|---|---|
-| `spunkpipe-core` | Manifest format, hashing, signing, blob store |
-| `spunkpipe-profile` | Declarative game profiles (paths, process names) |
-| `spunkpipe-server` | The publisher |
-| `spunkpipe-client` | Sync engine (check, stage, apply), lockfile, rollback |
-| `spunkpipe-daemon` | Background engine: polling, modes, game detection, config, autostart |
-| `spunkpipe-tray` | The tray app |
-| `spunkpipe` | The command-line binary |
+`spunkpipe update` only accepts releases signed with SpunkPipe's release key, and never installs an older
+version.
 
 ## Licence
 
